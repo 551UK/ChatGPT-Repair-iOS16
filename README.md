@@ -4,13 +4,13 @@
 
 **Goal:** restore up-to-date conversation history, fully functional attachments in **all existing conversations**, and other compatible features using an independent, maintainable 551UK source project.
 
-## Current development status — v0.5.0 diagnostic companion
+## Current development status — v0.6.0 diagnostic companion
 
 **Neither missing history nor missing upload buttons is fixed yet.** Do not claim this release as a repair; it is a controlled test following the failed v0.1–v0.3 approaches. Keep the already-working ChatGBeFree 2.3.5 installed until its functionality can be reconstructed and tested in source.
 
 ### Downloads
 
-- [v0.5.0 experimental release](https://github.com/551UK/ChatGPT-Repair-iOS16/releases/tag/v0.5.0)
+- [v0.6.0 experimental release](https://github.com/551UK/ChatGPT-Repair-iOS16/releases/tag/v0.6.0)
 - [Side-by-side analysis: 2024 vs 2026 IPAs](docs/2024_VS_2026_IPA.md)
 - [Earlier IPA analysis](docs/IPA_ANALYSIS.md)
 
@@ -29,24 +29,24 @@ The user has **hundreds of conversations** that do not appear in the 2024 sideba
 
 The missing `+` button affects **every conversation opened from the sidebar**, not only conversations first created on a PC. It works in a brand-new chat started on the phone. The earlier response logs observed conversation messages, not `POST /conversation/init` metadata. We cannot know what disables the button until those are compared.
 
-## What v0.5.0 changes
+## What v0.6.0 changes
 
-The source code no longer registers a custom `NSURLProtocol`, modifies session configurations, replays network calls, alters request query parameters, changes the JSON body, or fabricates successful responses. It logs URLSession task route categories/pagination and passively observes both completion-handler responses and already-implemented URLSession delegate callbacks. No network requests or response payloads are changed.
+The latest v0.5.0 on-device log showed delegate handlers installing, but no captured response completions. We checked the actual ChatGBeFree 2.3.5 binary and found a custom `LVBVoiceURLProtocol` interceptor. **v0.6.0 is a controlled history-only bypass test**, with source in [src/HistoryIsolation.m](src/HistoryIsolation.m).
 
-See `src/HistoryRepair.m`. The only writable file is a bounded diagnostic log inside the app's own Caches directory. No chat contents, titles, conversation identifiers, access tokens or full request URLs are logged. Delegate callbacks are observed only if their delegate class already implements those methods; this remains incomplete coverage of other Swift transports. A missing completion line is **not proof** the server failed.
+Only GET requests for the conversation list are excluded from that specific third-party interceptor. Every model, attachment, image, voice, message-send and conversation-detail route remains unchanged. No requests are rewritten, no server responses are fabricated, and no chat data is collected.
 
-### Testing (please follow this exact order)
+**This can make history better, worse or unchanged**, depending on whether the existing interceptor is part of the problem. It is not a proven fix, nor does it restore the missing + attachment button. Read [test notes](docs/HISTORY_ISOLATION_V06.md).
 
-1. Upgrade only the 551UK tweak to v0.5.0. Keep ChatGBeFree 2.3.5 installed.
-2. Force-close ChatGPT and reopen.
-3. Start **one new conversation within the app** and confirm whether the `+` button works.
-4. Next open **one existing sidebar conversation** and confirm whether its `+` button is missing.
-5. Pull down to refresh sidebar; try scrolling older chats and note whether new items appear.
-6. Use Filza in the ChatGPT data container to find `Library/Caches/ChatGPT551Repair.log`. Share the log (do not share cookies, tokens or private messages).
+### Test
 
-If the log has `delegate hooks data=1 finished=1` and `complete route=init` entries, compare the `blocked=` and model-field presence between the new and existing conversation. Report which chat you opened first. The diagnostic may log some delegate hook entries for sessions that are not used by these routes. If `complete route=history` is absent, we still need a different observation point; it does not mean the request timed out. The code buffers at most 4 MB of relevant response data *in memory only* to inspect structural fields.
+1. Install v0.6.0 over v0.5.0, while retaining the known-working ChatGBeFree 2.3.5.
+2. Force-close and reopen ChatGPT 1.2024.200; check whether more chats appear.
+3. Pull down to refresh once; check again.
+4. Send `Library/Caches/ChatGPT551Repair.log` from the app's data container and report whether the sidebar changed.
 
-If the app becomes unstable, remove only `com.551uk.chatgptrepair`; it is a separate companion and does not delete chats.
+The log should show whether `LVBVoiceURLProtocol` exists and whether its original `canInitWithRequest:` implementation wanted to intercept the history GETs. If it did not, this particular bypass cannot solve the issue. Removing only the 551UK tweak reverts the test.
+
+**Attachment buttons in all existing chats remain a separate unresolved issue.** The new-chat versus existing-chat difference is established from your test reports, but the precise metadata/UI condition has not yet been verified.
 
 ## Building / release
 
