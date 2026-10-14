@@ -48,3 +48,23 @@ After opening the sidebar and one PC-created and one iPhone-created chat, retrie
 For history, check whether any probe route=history-list is logged, which offset/limit are requested, and whether history status/items lines appear. For attachment UI, compare whether conversation-init and conversation-detail categories are requested. This log by itself cannot determine the values of private blocked features or definitively identify the cause.
 
 This is an investigative build, not a verified repair or standalone replacement. Further changes should be driven by observed on-device behaviour and harmless structural evidence.
+
+## v0.2.0 on-device observation (14 October 2026)
+
+A user-supplied, private-safe diagnostic log showed:
+- Conversation-list GET invoked at `offset=0, limit=20`, with an `order` parameter and no `is_archived` parameter.
+- No successful list-response was observed. At 16:29:15 UTC, the forwarded history request returned `HTTP 500` (28 response bytes). An earlier run observed a URLSession timeout (`NSURLErrorDomain -1001`).
+- Conversation-detail GETs returned `HTTP 200`, including messages from newer-model conversations.
+- This does **not** establish that the server is permanently broken: status may originate in an upstream proxy or be influenced by interception. It also does not determine the cause of the missing upload UI.
+
+## v0.3.0 experiment
+
+When and only when an intercepted history GET returns HTTP 500 **and lacks `is_archived`**, retry that same authenticated GET once with `is_archived=false`. Keep offset, limit, order and headers unchanged. Apply the result only if it returns HTTP 200 and a JSON conversation-list array. Otherwise pass through the original error. Cap retry timeout at 12 seconds.
+
+Log interpretation:
+- `history original_500; retrying_once variant=is_archived_false`: alternate request attempted.
+- `history retry ... status=200 ... list_valid=1`: alternate server response looks compatible; if the sidebar still does not update, client decoding/state may be at fault.
+- `history retry ... list_valid=0` or non-200: no evidence that the parameter fixed the request.
+- Absence of all `history status=` lines: protocol interception or the client transport needs further investigation.
+
+**This is explicitly experimental and is not claimed to fix either the sidebar or attachment button until verified on-device.**
