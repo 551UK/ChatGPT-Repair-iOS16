@@ -67,11 +67,11 @@ jobs:
 
           Experimental diagnostic rootless companion tweak for **ChatGPT 1.2024.200 on iOS 16**.
 
-          - v0.6.0 isolates the history bug by bypassing ChatGBeFree's custom URLProtocol **only** for official conversation-list GETs. No URL, header, request body, or server response is changed.
-          - Logs whether the upstream interceptor originally claimed those history GETs, so we can assess whether it prevents the legacy client loading more chats.
+          - v0.7.0 retains the history-only ChatGBeFree URLProtocol bypass and observes the NSURLSessionTask completion status and error code, without altering requests or responses.
+          - Logs whether the upstream interceptor would claim the history GET, and whether the bypassed request completes with HTTP 200, an HTTP error, or a URLSession error.
           - All tweak source code and GitHub Actions build scripts are in this repository.
 
-          **Important:** This is an *experimental history-isolation build*, NOT a verified fix and NOT a complete replacement. Keep ChatGBeFree 2.3.5 installed. The test may regress history, and the missing attachment (+) button is not repaired. Remove only the 551UK companion to revert. Install and test at your own risk; remove this companion package if it interferes with the ChatGPT app.
+          **Important:** This is an *experimental history-response diagnostic*, NOT a verified fix and NOT a complete replacement. Keep ChatGBeFree 2.3.5 installed. The test may regress history, and the missing attachment (+) button is not repaired. Remove only the 551UK companion to revert. Install and test at your own risk; remove this companion package if it interferes with the ChatGPT app.
 
           See the README for testing and diagnostics. Credit to Liam / ChatGBeFree for the upstream GPLv3 version-spoof concept; no third-party compiled dylib is included.
           NOTES
