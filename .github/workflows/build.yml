@@ -11,6 +11,9 @@ on:
       - 'ChatGPTRepair.plist'
       - '.github/workflows/build.yml'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-15
@@ -36,3 +39,44 @@ jobs:
           name: ChatGPT-Repair-iOS16-rootless
           path: packages/*.deb
           if-no-files-found: error
+      - name: Publish versioned GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(awk '/^Version:/ { print $2; exit }' control)"
+          test -n "$version"
+          tag="v$version"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists; leaving it unchanged."
+            exit 0
+          fi
+          shopt -s nullglob
+          debs=(packages/*.deb)
+          if [ "${#debs[@]}" -ne 1 ]; then
+            echo "Expected one DEB, found ${#debs[@]}" >&2
+            exit 1
+          fi
+          mkdir -p release
+          output="release/ChatGPT-Repair-iOS16_${version}_iphoneos-arm64.deb"
+          cp "${debs[0]}" "$output"
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          ## ChatGPT Repair iOS16 — 551UK
+
+          First experimental rootless companion tweak for **ChatGPT 1.2024.200 on iOS 16**.
+
+          - Adds a conservative conversation-history response compatibility adapter and bypasses local caching for supported history requests.
+          - Adds private-safe diagnostics of conversation-detail fields and broad model family to investigate the missing attachment (+) control in PC-created chats.
+          - All tweak source code and GitHub Actions build scripts are in this repository.
+
+          **Important:** This version is an *experimental companion*, not a complete ChatGBeFree replacement. Keep ChatGBeFree 2.3.5 installed to retain its existing working features. Neither the history problem nor the missing attachments button is confirmed fixed yet. Install and test at your own risk; remove this companion package if it interferes with the ChatGPT app.
+
+          See the README for testing and diagnostics. Credit to Liam / ChatGBeFree for the upstream GPLv3 version-spoof concept; no third-party compiled dylib is included.
+          NOTES
+          gh release create "$tag" "$output" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "ChatGPT Repair iOS16 $tag (551UK) — Experimental" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
