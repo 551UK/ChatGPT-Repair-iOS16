@@ -262,6 +262,14 @@ static void CGRInspect(NSURLRequest *request, NSData *data,
  */
 static char kCGRCapturedBytes, kCGRDataOriginal, kCGRDoneOriginal, kCGRInstalled;
 static const NSUInteger kCGRCaptureLimit = 4 * 1024 * 1024;
+static NSValue *CGRSavedDelegateImplementation(id object, const void *key) {
+    for (Class cls = object_getClass(object); cls; cls = class_getSuperclass(cls)) {
+        NSValue *value = objc_getAssociatedObject((id)cls, key);
+        if (value) return value;
+    }
+    return nil;
+}
+
 
 typedef void (*CGRDataCallback)(id, SEL, NSURLSession *, NSURLSessionDataTask *, NSData *);
 typedef void (*CGRDoneCallback)(id, SEL, NSURLSession *, NSURLSessionTask *, NSError *);
@@ -269,7 +277,7 @@ typedef void (*CGRDoneCallback)(id, SEL, NSURLSession *, NSURLSessionTask *, NSE
 static void CGRDelegateReceived(id object, SEL selector,
                                 NSURLSession *session,
                                 NSURLSessionDataTask *task, NSData *chunk) {
-    NSValue *value = objc_getAssociatedObject(object_getClass(object), &kCGRDataOriginal);
+    NSValue *value = CGRSavedDelegateImplementation(object, &kCGRDataOriginal);
     CGRDataCallback previous = (CGRDataCallback)[value pointerValue];
     // Preserve the original application's processing and callback order.
     if (previous) previous(object, selector, session, task, chunk);
@@ -305,7 +313,7 @@ static void CGRDelegateFinished(id object, SEL selector,
         if (captured.length >= kCGRCaptureLimit)
             CGRLog(@"delegate response capture truncated at 4MB");
     }
-    NSValue *value = objc_getAssociatedObject(object_getClass(object), &kCGRDoneOriginal);
+    NSValue *value = CGRSavedDelegateImplementation(object, &kCGRDoneOriginal);
     CGRDoneCallback previous = (CGRDoneCallback)[value pointerValue];
     if (previous) previous(object, selector, session, task, error);
 }
