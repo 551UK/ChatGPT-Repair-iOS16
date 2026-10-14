@@ -153,6 +153,55 @@ static NSData *CGRRewriteIfSafe(NSData *data, NSURLResponse *response, CGRRoute 
     return CGRRouteForRequest(request) != CGRRouteNone;
 }
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
+- (void)cgrCompleteWithData:(NSData *)data
+                   response:(NSURLResponse *)response
+                      error:(NSError *)error
+                      route:(CGRRoute)route {
+    if (self.cgrStopped) return;
+    id<NSURLProtocolClient> client = self.client;
+    NSString *label = route == CGRRouteHistory ? @"history" : @"detail";
+    if (error) {
+        CGRLog([NSString stringWithFormat:@"%@ network_error=%ld", label,
+                (long)error.code]);
+        [client URLProtocol:self didFailWithError:error];
+    } else if (!response) {
+        [client URLProtocol:self didFailWithError:
+           [NSError errorWithDomain:NSURLErrorDomain
+                               code:NSURLErrorUnknown userInfo:nil]];
+    } else {
+        NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
+            ? [(NSHTTPURLResponse *)response statusCode] : 0;
+        CGRLog([NSString stringWithFormat:@"%@ status=%ld bytes=%lu",
+                label, (long)status, (unsigned long)data.length]);
+        NSData *output = CGRRewriteIfSafe(data, response, route);
+        NSURLResponse *sent = response;
+        if (output != data && [response isKindOfClass:[NSHTTPURLResponse class]]) {
+            NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
+            NSMutableDictionary *headers = [http.allHeaderFields mutableCopy];
+            for (NSString *key in [headers allKeys]) {
+                if ([key caseInsensitiveCompare:@"Content-Length"] == NSOrderedSame ||
+                    [key caseInsensitiveCompare:@"Content-Encoding"] == NSOrderedSame ||
+                    [key caseInsensitiveCompare:@"Content-MD5"] == NSOrderedSame)
+                    [headers removeObjectForKey:key];
+            }
+            sent = [[NSHTTPURLResponse alloc] initWithURL:http.URL
+                   statusCode:http.statusCode HTTPVersion:@"HTTP/1.1"
+                   headerFields:headers];
+        }
+        [client URLProtocol:self didReceiveResponse:sent
+                 cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+        if (output.length) [client URLProtocol:self didLoadData:output];
+        [client URLProtocolDidFinishLoading:self];
+    }
+    [self.cgrSession finishTasksAndInvalidate];
+    self.cgrTask = nil;
+}
+
+/* A 500 might be caused by old optional query defaults.
+ * Retry once with an explicit non-archived filter. If it does not return a
+ * decodable list, deliver the ORIGINAL server reply, unchanged.
+ * This never fabricates a conversation, authentication token, or success.
+ */
 - (void)startLoading {
     self.cgrStopped = NO;
     CGRRoute route = CGRRouteForRequest(self.request);
@@ -171,44 +220,66 @@ static NSData *CGRRewriteIfSafe(NSData *data, NSURLResponse *response, CGRRoute 
       completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf || strongSelf.cgrStopped) return;
-        id<NSURLProtocolClient> client = strongSelf.client;
-        NSString *label = route == CGRRouteHistory ? @"history" : @"detail";
-        if (error) {
-            CGRLog([NSString stringWithFormat:@"%@ network_error=%ld",
-                    label, (long)error.code]);
-            [client URLProtocol:strongSelf didFailWithError:error];
-        } else if (!response) {
-            [client URLProtocol:strongSelf didFailWithError:
-                [NSError errorWithDomain:NSURLErrorDomain
-                                    code:NSURLErrorUnknown userInfo:nil]];
-        } else {
-            NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
-                ? [(NSHTTPURLResponse *)response statusCode] : 0;
-            CGRLog([NSString stringWithFormat:@"%@ status=%ld bytes=%lu",
-                    label, (long)status, (unsigned long)data.length]);
-            NSData *output = CGRRewriteIfSafe(data, response, route);
-            NSURLResponse *sent = response;
-            if (output != data && [response isKindOfClass:[NSHTTPURLResponse class]]) {
-                NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
-                NSMutableDictionary *headers = [http.allHeaderFields mutableCopy];
-                for (NSString *key in [headers allKeys]) {
-                    if ([key caseInsensitiveCompare:@"Content-Length"] == NSOrderedSame ||
-                        [key caseInsensitiveCompare:@"Content-Encoding"] == NSOrderedSame ||
-                        [key caseInsensitiveCompare:@"Content-MD5"] == NSOrderedSame) {
-                        [headers removeObjectForKey:key];
-                    }
-                }
-                sent = [[NSHTTPURLResponse alloc] initWithURL:http.URL
-                       statusCode:http.statusCode HTTPVersion:@"HTTP/1.1"
-                       headerFields:headers];
+
+        NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
+            ? [(NSHTTPURLResponse *)response statusCode] : 0;
+        NSURLComponents *components = [NSURLComponents componentsWithURL:copy.URL
+                                               resolvingAgainstBaseURL:NO];
+        BOOL archivedAlreadySpecified = NO;
+        for (NSURLQueryItem *item in components.queryItems) {
+            if ([item.name isEqualToString:@"is_archived"]) {
+                archivedAlreadySpecified = YES;
+                break;
             }
-            [client URLProtocol:strongSelf didReceiveResponse:sent
-                          cacheStoragePolicy:NSURLCacheStorageNotAllowed];
-            if (output.length) [client URLProtocol:strongSelf didLoadData:output];
-            [client URLProtocolDidFinishLoading:strongSelf];
         }
-        [strongSelf.cgrSession finishTasksAndInvalidate];
-        strongSelf.cgrTask = nil;
+        if (route == CGRRouteHistory && !error && status == 500 &&
+            components && !archivedAlreadySpecified) {
+            // Test only the observed missing flag. Preserve pagination, ordering,
+            // cookies, account headers, and the original request otherwise.
+            NSMutableArray<NSURLQueryItem *> *query =
+                [components.queryItems mutableCopy] ?: [NSMutableArray array];
+            [query addObject:[NSURLQueryItem queryItemWithName:@"is_archived"
+                                                         value:@"false"]];
+            components.queryItems = query;
+            NSMutableURLRequest *alternative = [copy mutableCopy];
+            alternative.URL = components.URL;
+            alternative.timeoutInterval = 12;
+            if (!alternative.URL) {
+                [strongSelf cgrCompleteWithData:data response:response
+                                          error:error route:route];
+                return;
+            }
+            CGRLog(@"history original_500; retrying_once variant=is_archived_false");
+            strongSelf.cgrTask = [strongSelf.cgrSession dataTaskWithRequest:alternative
+              completionHandler:^(NSData *retryData, NSURLResponse *retryResponse,
+                                  NSError *retryError) {
+                __strong typeof(weakSelf) again = weakSelf;
+                if (!again || again.cgrStopped) return;
+                NSInteger retryStatus = [retryResponse isKindOfClass:
+                                            [NSHTTPURLResponse class]]
+                    ? [(NSHTTPURLResponse *)retryResponse statusCode] : 0;
+                id retryJSON = retryData
+                    ? [NSJSONSerialization JSONObjectWithData:retryData
+                                                      options:0 error:NULL] : nil;
+                BOOL listOK = [retryJSON isKindOfClass:[NSDictionary class]] &&
+                    ([retryJSON[@"items"] isKindOfClass:[NSArray class]] ||
+                     CGRAlternativeItems(retryJSON) != nil);
+                CGRLog([NSString stringWithFormat:
+                   @"history retry variant=is_archived_false status=%ld network_error=%ld list_valid=%d",
+                   (long)retryStatus, (long)retryError.code, (int)listOK]);
+                if (!retryError && retryStatus == 200 && listOK) {
+                    [again cgrCompleteWithData:retryData response:retryResponse
+                                         error:nil route:route];
+                } else {
+                    [again cgrCompleteWithData:data response:response
+                                         error:error route:route];
+                }
+              }];
+            [strongSelf.cgrTask resume];
+            return;
+        }
+        [strongSelf cgrCompleteWithData:data response:response
+                                  error:error route:route];
     }];
     [self.cgrTask resume];
 }
@@ -342,6 +413,6 @@ __attribute__((constructor)) static void CGRBoot(void) {
                    @selector(ephemeralSessionConfiguration),
                    @selector(cgr_ephemeralSessionConfiguration));
         CGRSwizzleTaskResume();
-        CGRLog(@"v0.2.0 loaded: IPA-guided request/pagination probe + history adapter");
+        CGRLog(@"v0.3.0 loaded: history 500 fallback experiment + attachment diagnostics");
     }
 }
