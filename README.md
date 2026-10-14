@@ -4,13 +4,13 @@
 
 **Goal:** restore up-to-date conversation history, fully functional attachments in **all existing conversations**, and other compatible features using an independent, maintainable 551UK source project.
 
-## Current development status — v0.4.0 diagnostic companion
+## Current development status — v0.5.0 diagnostic companion
 
 **Neither missing history nor missing upload buttons is fixed yet.** Do not claim this release as a repair; it is a controlled test following the failed v0.1–v0.3 approaches. Keep the already-working ChatGBeFree 2.3.5 installed until its functionality can be reconstructed and tested in source.
 
 ### Downloads
 
-- [v0.4.0 experimental release](https://github.com/551UK/ChatGPT-Repair-iOS16/releases/tag/v0.4.0)
+- [v0.5.0 experimental release](https://github.com/551UK/ChatGPT-Repair-iOS16/releases/tag/v0.5.0)
 - [Side-by-side analysis: 2024 vs 2026 IPAs](docs/2024_VS_2026_IPA.md)
 - [Earlier IPA analysis](docs/IPA_ANALYSIS.md)
 
@@ -29,22 +29,22 @@ The user has **hundreds of conversations** that do not appear in the 2024 sideba
 
 The missing `+` button affects **every conversation opened from the sidebar**, not only conversations first created on a PC. It works in a brand-new chat started on the phone. The earlier response logs observed conversation messages, not `POST /conversation/init` metadata. We cannot know what disables the button until those are compared.
 
-## What v0.4.0 changes
+## What v0.5.0 changes
 
-The source code no longer registers a custom `NSURLProtocol`, modifies session configurations, replays network calls, alters request query parameters, changes the JSON body, or fabricates successful responses. It only logs URLSession task route categories/pagination and **when used**, completion-handler response statuses and safely summarized JSON structure.
+The source code no longer registers a custom `NSURLProtocol`, modifies session configurations, replays network calls, alters request query parameters, changes the JSON body, or fabricates successful responses. It logs URLSession task route categories/pagination and passively observes both completion-handler responses and already-implemented URLSession delegate callbacks. No network requests or response payloads are changed.
 
-See `src/HistoryRepair.m`. The only writable file is a bounded diagnostic log inside the app's own Caches directory. No chat contents, titles, conversation identifiers, access tokens or full request URLs are logged. If the app uses delegate-based tasks instead of completion blocks, some responses will not be observed — this is **not evidence of server failure**.
+See `src/HistoryRepair.m`. The only writable file is a bounded diagnostic log inside the app's own Caches directory. No chat contents, titles, conversation identifiers, access tokens or full request URLs are logged. Delegate callbacks are observed only if their delegate class already implements those methods; this remains incomplete coverage of other Swift transports. A missing completion line is **not proof** the server failed.
 
 ### Testing (please follow this exact order)
 
-1. Upgrade only the 551UK tweak to v0.4.0. Keep ChatGBeFree 2.3.5 installed.
+1. Upgrade only the 551UK tweak to v0.5.0. Keep ChatGBeFree 2.3.5 installed.
 2. Force-close ChatGPT and reopen.
 3. Start **one new conversation within the app** and confirm whether the `+` button works.
 4. Next open **one existing sidebar conversation** and confirm whether its `+` button is missing.
 5. Pull down to refresh sidebar; try scrolling older chats and note whether new items appear.
 6. Use Filza in the ChatGPT data container to find `Library/Caches/ChatGPT551Repair.log`. Share the log (do not share cookies, tokens or private messages).
 
-If the log has `complete route=init` entries, compare `blocked=` and model-field presence between the new and existing conversation. If `complete route=history` is absent, we need a different passive observation point; it does not mean the request timed out.
+If the log has `delegate hooks data=1 finished=1` and `complete route=init` entries, compare the `blocked=` and model-field presence between the new and existing conversation. Report which chat you opened first. The diagnostic may log some delegate hook entries for sessions that are not used by these routes. If `complete route=history` is absent, we still need a different observation point; it does not mean the request timed out. The code buffers at most 4 MB of relevant response data *in memory only* to inspect structural fields.
 
 If the app becomes unstable, remove only `com.551uk.chatgptrepair`; it is a separate companion and does not delete chats.
 
