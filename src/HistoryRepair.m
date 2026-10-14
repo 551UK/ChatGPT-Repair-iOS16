@@ -254,6 +254,123 @@ static void CGRInspect(NSURLRequest *request, NSData *data,
 }
 @end
 
+/*
+ * Delegate callback observer. The older app and ChatGBeFree's URLProtocol
+ * forwarder can use URLSession delegate callbacks without a completion block.
+ * Wrap ONLY callbacks a delegate already implements, pass original arguments
+ * unchanged, and never modify networking state or payloads.
+ */
+static char kCGRCapturedBytes, kCGRDataOriginal, kCGRDoneOriginal, kCGRInstalled;
+static const NSUInteger kCGRCaptureLimit = 4 * 1024 * 1024;
+
+typedef void (*CGRDataCallback)(id, SEL, NSURLSession *, NSURLSessionDataTask *, NSData *);
+typedef void (*CGRDoneCallback)(id, SEL, NSURLSession *, NSURLSessionTask *, NSError *);
+
+static void CGRDelegateReceived(id object, SEL selector,
+                                NSURLSession *session,
+                                NSURLSessionDataTask *task, NSData *chunk) {
+    NSValue *value = objc_getAssociatedObject(object_getClass(object), &kCGRDataOriginal);
+    CGRDataCallback previous = (CGRDataCallback)[value pointerValue];
+    // Preserve the original application's processing and callback order.
+    if (previous) previous(object, selector, session, task, chunk);
+    if (CGRRouteForRequest(task.originalRequest ?: task.currentRequest) == CGRNone)
+        return;
+    @synchronized(task) {
+        NSMutableData *captured = objc_getAssociatedObject(task, &kCGRCapturedBytes);
+        if (!captured) {
+            captured = [NSMutableData data];
+            objc_setAssociatedObject(task, &kCGRCapturedBytes, captured,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        if (captured.length < kCGRCaptureLimit && chunk.length > 0) {
+            NSUInteger bytes = MIN(chunk.length, kCGRCaptureLimit - captured.length);
+            [captured appendBytes:chunk.bytes length:bytes];
+        }
+    }
+}
+
+static void CGRDelegateFinished(id object, SEL selector,
+                                NSURLSession *session, NSURLSessionTask *task,
+                                NSError *error) {
+    CGRRoute route = CGRRouteForRequest(task.originalRequest ?: task.currentRequest);
+    if (route != CGRNone) {
+        NSData *captured = nil;
+        @synchronized(task) {
+            captured = [objc_getAssociatedObject(task, &kCGRCapturedBytes) copy];
+            objc_setAssociatedObject(task, &kCGRCapturedBytes, nil,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        CGRInspect(task.originalRequest ?: task.currentRequest, captured,
+                   task.response, error);
+        if (captured.length >= kCGRCaptureLimit)
+            CGRLog(@"delegate response capture truncated at 4MB");
+    }
+    NSValue *value = objc_getAssociatedObject(object_getClass(object), &kCGRDoneOriginal);
+    CGRDoneCallback previous = (CGRDoneCallback)[value pointerValue];
+    if (previous) previous(object, selector, session, task, error);
+}
+
+static BOOL CGRInstallDelegateMethod(Class cls, SEL selector, IMP replacement, void *key) {
+    Method previous = class_getInstanceMethod(cls, selector);
+    if (!previous) return NO; // Do not introduce new optional delegate behaviour.
+    IMP original = method_getImplementation(previous);
+    if (!original || original == replacement) return NO;
+    objc_setAssociatedObject((id)cls, key, [NSValue valueWithPointer:(void *)original],
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    const char *types = method_getTypeEncoding(previous);
+    if (!class_addMethod(cls, selector, replacement, types)) {
+        // Direct implementation on this class; original is saved above.
+        Method own = class_getInstanceMethod(cls, selector);
+        method_setImplementation(own, replacement);
+    }
+    return YES;
+}
+
+static void CGRWatchDelegate(id delegate) {
+    if (!delegate) return;
+    Class cls = object_getClass(delegate);
+    if (!cls) return;
+    @synchronized([NSURLSession class]) {
+        if (objc_getAssociatedObject((id)cls, &kCGRInstalled)) return;
+        BOOL received = CGRInstallDelegateMethod(cls,
+               @selector(URLSession:dataTask:didReceiveData:),
+               (IMP)CGRDelegateReceived, &kCGRDataOriginal);
+        BOOL finished = CGRInstallDelegateMethod(cls,
+               @selector(URLSession:task:didCompleteWithError:),
+               (IMP)CGRDelegateFinished, &kCGRDoneOriginal);
+        objc_setAssociatedObject((id)cls, &kCGRInstalled, @YES,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        CGRLog([NSString stringWithFormat:
+            @"delegate hooks data=%d finished=%d", (int)received, (int)finished]);
+    }
+}
+
+@interface NSURLSession (CGRDelegateObserver)
++ (NSURLSession *)cgr_sessionWithConfiguration:(NSURLSessionConfiguration *)configuration
+                                       delegate:(id<NSURLSessionDelegate>)delegate
+                                  delegateQueue:(NSOperationQueue *)queue;
+@end
+@implementation NSURLSession (CGRDelegateObserver)
++ (NSURLSession *)cgr_sessionWithConfiguration:(NSURLSessionConfiguration *)configuration
+                                       delegate:(id<NSURLSessionDelegate>)delegate
+                                  delegateQueue:(NSOperationQueue *)queue {
+    CGRWatchDelegate(delegate);
+    return [self cgr_sessionWithConfiguration:configuration
+                                      delegate:delegate delegateQueue:queue];
+}
+@end
+
+static BOOL CGRSwapSessionFactory(void) {
+    Class cls = [NSURLSession class];
+    Method a = class_getClassMethod(cls,
+        @selector(sessionWithConfiguration:delegate:delegateQueue:));
+    Method b = class_getClassMethod(cls,
+        @selector(cgr_sessionWithConfiguration:delegate:delegateQueue:));
+    if (!a || !b) return NO;
+    method_exchangeImplementations(a, b);
+    return YES;
+}
+
 static BOOL CGRSwap(Class cls, SEL a, SEL b) {
     Method old = class_getInstanceMethod(cls, a);
     Method new = class_getInstanceMethod(cls, b);
@@ -274,8 +391,9 @@ __attribute__((constructor)) static void CGRInitProbe(void) {
             @selector(cgr_observeDataTaskWithURL:completionHandler:));
         BOOL resume = CGRSwap([NSURLSessionTask class],
             @selector(resume), @selector(cgr_observeResume));
+        BOOL delegateFactory = CGRSwapSessionFactory();
         CGRLog([NSString stringWithFormat:
-            @"v0.4.0 passive compare loaded request_hook=%d url_hook=%d resume_hook=%d no_network_rewriting=1",
-            (int)request, (int)url, (int)resume]);
+            @"v0.5.0 passive delegate capture request_hook=%d url_hook=%d resume_hook=%d delegate_factory=%d no_network_rewriting=1",
+            (int)request, (int)url, (int)resume, (int)delegateFactory]);
     }
 }
