@@ -1,0 +1,38 @@
+name: Build ChatGPT Repair Rootless
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Makefile'
+      - 'control'
+      - 'ChatGPTRepair.plist'
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Theos and iOS 16.5 SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install dpkg ldid
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$HOME/theos"
+          mkdir -p "$HOME/theos/sdks"
+          curl -fL --retry 3 -o "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" "https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz"
+          tar -xJf "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" -C "$HOME/theos/sdks"
+      - name: Build rootless package
+        shell: bash
+        run: |
+          export THEOS="$HOME/theos"
+          make package FINALPACKAGE=1
+      - name: Save DEB as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatGPT-Repair-iOS16-rootless
+          path: packages/*.deb
+          if-no-files-found: error
