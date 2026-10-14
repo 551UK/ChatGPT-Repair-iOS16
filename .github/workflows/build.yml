@@ -67,11 +67,11 @@ jobs:
 
           Experimental diagnostic rootless companion tweak for **ChatGPT 1.2024.200 on iOS 16**.
 
-          - v0.5.0 observes existing NSURLSession delegate data/completion callbacks, in addition to the earlier task-start probes. No request, response, cache setting or destination is modified.
-          - Compares sanitized response structures for history lists and conversation initialization to investigate missing sidebar conversations and attachment controls in all existing chats.
+          - v0.6.0 isolates the history bug by bypassing ChatGBeFree's custom URLProtocol **only** for official conversation-list GETs. No URL, header, request body, or server response is changed.
+          - Logs whether the upstream interceptor originally claimed those history GETs, so we can assess whether it prevents the legacy client loading more chats.
           - All tweak source code and GitHub Actions build scripts are in this repository.
 
-          **Important:** This version is a *diagnostic companion*, not a complete ChatGBeFree replacement or a verified repair. Keep ChatGBeFree 2.3.5 installed to retain its existing working features. Neither missing history nor missing attachments is fixed by this package. Install and test at your own risk; remove this companion package if it interferes with the ChatGPT app.
+          **Important:** This is an *experimental history-isolation build*, NOT a verified fix and NOT a complete replacement. Keep ChatGBeFree 2.3.5 installed. The test may regress history, and the missing attachment (+) button is not repaired. Remove only the 551UK companion to revert. Install and test at your own risk; remove this companion package if it interferes with the ChatGPT app.
 
           See the README for testing and diagnostics. Credit to Liam / ChatGBeFree for the upstream GPLv3 version-spoof concept; no third-party compiled dylib is included.
           NOTES
