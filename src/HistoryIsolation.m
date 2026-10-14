@@ -74,6 +74,76 @@ static BOOL CGRLegacyCanInit(id cls, SEL selector, NSURLRequest *request) {
     return original;
 }
 
+/*
+ * Observe the history task's KVO state, independent of completion-handler
+ * vs. delegate transport. We record only status/bytes/error at completion.
+ * Original task execution and payloads are never changed.
+ */
+static char kCGRStateObserverKey;
+static void *kCGRStateContext = &kCGRStateContext;
+static NSUInteger sCGRHistoryTaskSequence = 0;
+
+@interface CGRHistoryTaskObserver : NSObject
+@property (nonatomic, weak) NSURLSessionTask *task;
+@property (nonatomic, assign) BOOL observing;
+@property (nonatomic, assign) NSUInteger sequence;
+- (instancetype)initWithTask:(NSURLSessionTask *)task sequence:(NSUInteger)sequence;
+- (void)stop;
+@end
+
+@implementation CGRHistoryTaskObserver
+- (instancetype)initWithTask:(NSURLSessionTask *)task sequence:(NSUInteger)sequence {
+    if ((self = [super init])) {
+        _task = task;
+        _sequence = sequence;
+        @try {
+            [task addObserver:self forKeyPath:@"state"
+                       options:NSKeyValueObservingOptionNew
+                       context:kCGRStateContext];
+            _observing = YES;
+        } @catch (__unused NSException *ex) {
+            CGRLog([NSString stringWithFormat:
+                @"v0.7 history_task=%lu state_observer_unavailable",
+                (unsigned long)_sequence]);
+        }
+    }
+    return self;
+}
+- (void)stop {
+    @synchronized (self) {
+        if (!_observing) return;
+        _observing = NO;
+        NSURLSessionTask *task = _task;
+        if (task) {
+            @try {
+                [task removeObserver:self forKeyPath:@"state"
+                             context:kCGRStateContext];
+            } @catch (__unused NSException *ex) {}
+        }
+    }
+}
+- (void)dealloc { [self stop]; }
+- (void)observeValueForKeyPath:(NSString *)path ofObject:(id)object
+    change:(NSDictionary<NSKeyValueChangeKey,id> *)change context:(void *)context {
+    if (context != kCGRStateContext) {
+        [super observeValueForKeyPath:path ofObject:object change:change context:context];
+        return;
+    }
+    NSURLSessionTask *task = [object isKindOfClass:[NSURLSessionTask class]]
+        ? object : nil;
+    if (!task || task.state != NSURLSessionTaskStateCompleted) return;
+    NSURLResponse *response = task.response;
+    NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
+        ? ((NSHTTPURLResponse *)response).statusCode : 0;
+    NSError *error = task.error;
+    CGRLog([NSString stringWithFormat:
+        @"v0.7 history_task=%lu completed=1 http_status=%ld error_code=%ld received_bytes=%lld",
+        (unsigned long)_sequence, (long)status, (long)(error ? error.code : 0),
+        (long long)task.countOfBytesReceived]);
+    [self stop];
+}
+@end
+
 @interface NSURLSessionTask (CGRHistoryStartProbe)
 - (void)cgr_historyResume;
 @end
@@ -82,8 +152,19 @@ static BOOL CGRLegacyCanInit(id cls, SEL selector, NSURLRequest *request) {
 - (void)cgr_historyResume {
     NSURLRequest *request = self.currentRequest ?: self.originalRequest;
     if (CGRHistoryRequest(request)) {
-        CGRLog([NSString stringWithFormat:@"v0.6 task_history_resume offset=%@ limit=%@",
-                CGRPage(request.URL, @"offset"), CGRPage(request.URL, @"limit")]);
+        @synchronized ([NSURLSessionTask class]) {
+            if (!objc_getAssociatedObject(self, &kCGRStateObserverKey)) {
+                NSUInteger next = ++sCGRHistoryTaskSequence;
+                CGRHistoryTaskObserver *observer = [[CGRHistoryTaskObserver alloc]
+                    initWithTask:self sequence:next];
+                objc_setAssociatedObject(self, &kCGRStateObserverKey, observer,
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                CGRLog([NSString stringWithFormat:
+                    @"v0.7 history_task=%lu started offset=%@ limit=%@ kvo=%d",
+                    (unsigned long)next, CGRPage(request.URL, @"offset"),
+                    CGRPage(request.URL, @"limit"), (int)observer.observing]);
+            }
+        }
     }
     [self cgr_historyResume];
 }
