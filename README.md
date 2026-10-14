@@ -4,13 +4,13 @@
 
 **Goal:** restore up-to-date conversation history, fully functional attachments in **all existing conversations**, and other compatible features using an independent, maintainable 551UK source project.
 
-## Current development status — v0.7.0 diagnostic companion
+## Current development status — v0.8.0 diagnostic companion
 
 **Neither missing history nor missing upload buttons is fixed yet.** Do not claim this release as a repair; it is a controlled test following the failed v0.1–v0.3 approaches. Keep the already-working ChatGBeFree 2.3.5 installed until its functionality can be reconstructed and tested in source.
 
 ### Downloads
 
-- [v0.7.0 experimental release](https://github.com/551UK/ChatGPT-Repair-iOS16/releases/tag/v0.7.0)
+- [v0.8.0 experimental release](https://github.com/551UK/ChatGPT-Repair-iOS16/releases/tag/v0.8.0)
 - [Side-by-side analysis: 2024 vs 2026 IPAs](docs/2024_VS_2026_IPA.md)
 - [Earlier IPA analysis](docs/IPA_ANALYSIS.md)
 
@@ -29,24 +29,15 @@ The user has **hundreds of conversations** that do not appear in the 2024 sideba
 
 The missing `+` button affects **every conversation opened from the sidebar**, not only conversations first created on a PC. It works in a brand-new chat started on the phone. The earlier response logs observed conversation messages, not `POST /conversation/init` metadata. We cannot know what disables the button until those are compared.
 
-## What v0.7.0 changes
+## v0.8.0: original interceptor control
 
-The latest v0.5.0 on-device log showed delegate handlers installing, but no captured response completions. We checked the actual ChatGBeFree 2.3.5 binary and found a custom `LVBVoiceURLProtocol` interceptor. **v0.7.0 is a controlled history-only bypass test**, with source in [src/HistoryIsolation.m](src/HistoryIsolation.m).
+The last v0.7.0 test established that bypassing the existing ChatGBeFree 2.3.5 interceptor for a history GET led to **NSURLError -1005** (network connection lost) after 9 seconds with 0 bytes and no HTTP response. The bypass is **disabled** in v0.8.0.
 
-Only GET requests for the conversation list are excluded from that specific third-party interceptor. v0.7.0 additionally logs task completion status, error code and byte count using passive state observation. Every model, attachment, image, voice, message-send and conversation-detail route remains unchanged. No requests are rewritten, no server responses are fabricated, and no chat data is collected.
+The source still observes the original interceptor's `canInitWithRequest:` decision and the same task's final status using passive KVO, but returns the original routing decision unmodified. This lets us compare original routing with bypassed routing. It does not implement any attachment UI changes or restore the missing chats.
 
-**This can make history better, worse or unchanged**, depending on whether the existing interceptor is part of the problem. It is not a proven fix, nor does it restore the missing + attachment button. Read [v0.7 outcome test notes](docs/HISTORY_OUTCOME_V07.md).
+Read the [v0.8 control test](docs/HISTORY_CONTROL_V08.md) before installing. Install v0.8.0 over v0.7.0, keep ChatGBeFree 2.3.5 installed, force close and reopen the app, refresh once, then send the updated `Library/Caches/ChatGPT551Repair.log`.
 
-### Test
-
-1. Install v0.7.0 over v0.5.0, while retaining the known-working ChatGBeFree 2.3.5.
-2. Force-close and reopen ChatGPT 1.2024.200; check whether more chats appear.
-3. Pull down to refresh once; check again.
-4. Send `Library/Caches/ChatGPT551Repair.log` from the app's data container and report whether the sidebar changed.
-
-The log should show whether `LVBVoiceURLProtocol` wanted to intercept history GETs and — if the task state observer receives a completed event — what HTTP status or network error resulted. If it did not, this particular bypass cannot solve the issue. Removing only the 551UK tweak reverts the test.
-
-**Attachment buttons in all existing chats remain a separate unresolved issue.** The new-chat versus existing-chat difference is established from your test reports, but the precise metadata/UI condition has not yet been verified.
+**Look for:** `force_bypass=0`, then `history_task=... completed=1 http_status=... error_code=...`. A 200 suggests the older response decoder/UI could be dropping conversations; HTTP 500 or -1005 suggests the request/network path must be investigated before pagination.
 
 ## Building / release
 
