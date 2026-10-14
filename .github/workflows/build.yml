@@ -67,11 +67,11 @@ jobs:
 
           First experimental rootless companion tweak for **ChatGPT 1.2024.200 on iOS 16**.
 
-          - Adds a conservative conversation-history response compatibility adapter and bypasses local caching for supported history requests.
-          - Adds private-safe diagnostics of conversation-detail fields and broad model family to investigate the missing attachment (+) control in PC-created chats.
+          - v0.4.0 uses passive network diagnostics only; it does not intercept, rewrite, replay or cache-bypass user requests. This isolates possible conflicts with the existing ChatGBeFree networking hooks.
+          - Compares sanitized response structures for history lists and conversation initialization to investigate missing sidebar conversations and attachment controls in all existing chats.
           - All tweak source code and GitHub Actions build scripts are in this repository.
 
-          **Important:** This version is an *experimental companion*, not a complete ChatGBeFree replacement. Keep ChatGBeFree 2.3.5 installed to retain its existing working features. Neither the history problem nor the missing attachments button is confirmed fixed yet. Install and test at your own risk; remove this companion package if it interferes with the ChatGPT app.
+          **Important:** This version is a *diagnostic companion*, not a complete ChatGBeFree replacement or a verified repair. Keep ChatGBeFree 2.3.5 installed to retain its existing working features. Neither missing history nor missing attachments is fixed by this package. Install and test at your own risk; remove this companion package if it interferes with the ChatGPT app.
 
           See the README for testing and diagnostics. Credit to Liam / ChatGBeFree for the upstream GPLv3 version-spoof concept; no third-party compiled dylib is included.
           NOTES
