@@ -247,6 +247,84 @@ static void CGRInsert(NSURLSessionConfiguration *cfg) {
 }
 @end
 
+/*
+ * IPA-grounded request probe. NSURLProtocol only observes sessions where the
+ * client has registered it; the Swift client also uses its own task delegates.
+ * An NSURLSessionTask resume hook supplies route/pagination evidence without
+ * reading message bodies, request headers, cookies or conversation IDs.
+ */
+static NSString *CGRProbeLabel(NSURLRequest *request) {
+    NSURL *url = request.URL;
+    if (!CGROfficialHost(url.host)) return nil;
+    NSString *p = url.path ?: @"";
+    if ([p isEqualToString:@"/backend-api/conversations"] ||
+        [p isEqualToString:@"/conversations"] ||
+        [p isEqualToString:@"/backend-api/conversations/"] ||
+        [p isEqualToString:@"/conversations/"]) return @"history-list";
+    if ([p isEqualToString:@"/backend-api/conversation/init"] ||
+        [p isEqualToString:@"/conversation/init"]) return @"conversation-init";
+    if ([p isEqualToString:@"/backend-api/conversation"] ||
+        [p isEqualToString:@"/conversation"]) return @"conversation-send";
+    if ([p containsString:@"conversation_detail_metadata"] ||
+        [p containsString:@"conversation-detail-metadata"] ||
+        [p containsString:@"conversation_detail"]) return @"conversation-metadata";
+    if (([p hasPrefix:@"/backend-api/conversation/"] ||
+         [p hasPrefix:@"/conversation/"]) &&
+        ![p containsString:@"/voice/"]) return @"conversation-detail";
+    return nil;
+}
+
+static NSString *CGRSafePageValue(NSURL *url, NSString *key) {
+    NSURLComponents *parts = [NSURLComponents componentsWithURL:url
+                                        resolvingAgainstBaseURL:NO];
+    for (NSURLQueryItem *q in parts.queryItems) {
+        if (![q.name isEqualToString:key]) continue;
+        NSString *v = q.value ?: @"";
+        if (v.length == 0 || v.length > 7) return @"invalid";
+        NSCharacterSet *notDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+        return [v rangeOfCharacterFromSet:notDigits].location == NSNotFound ? v : @"invalid";
+    }
+    return @"-";
+}
+
+@interface NSURLSessionTask (CGRIPARequestProbe)
+- (void)cgr_probeResume;
+@end
+
+@implementation NSURLSessionTask (CGRIPARequestProbe)
+- (void)cgr_probeResume {
+    NSURLRequest *request = self.currentRequest ?: self.originalRequest;
+    NSString *category = CGRProbeLabel(request);
+    if (category) {
+        NSString *method = [request.HTTPMethod.uppercaseString isEqualToString:@"POST"]
+            ? @"POST" : @"GET";
+        if ([category isEqualToString:@"history-list"]) {
+            CGRLog([NSString stringWithFormat:
+                @"probe route=%@ method=%@ offset=%@ limit=%@ order_present=%d archived_present=%d",
+                category, method,
+                CGRSafePageValue(request.URL, @"offset"),
+                CGRSafePageValue(request.URL, @"limit"),
+                (int)([NSURLComponents componentsWithURL:request.URL
+                  resolvingAgainstBaseURL:NO].queryItems
+                  ? [[request.URL.query lowercaseString] containsString:@"order="] : NO),
+                (int)[[request.URL.query lowercaseString] containsString:@"is_archived="]]);
+        } else {
+            CGRLog([NSString stringWithFormat:@"probe route=%@ method=%@",
+                   category, method]);
+        }
+    }
+    [self cgr_probeResume];
+}
+@end
+
+static void CGRSwizzleTaskResume(void) {
+    Method original = class_getInstanceMethod([NSURLSessionTask class],
+                                             @selector(resume));
+    Method replacement = class_getInstanceMethod([NSURLSessionTask class],
+                                                @selector(cgr_probeResume));
+    if (original && replacement) method_exchangeImplementations(original, replacement);
+}
+
 static void CGRSwizzle(Class cls, SEL a, SEL b) {
     Method oldMethod = class_getClassMethod(cls, a);
     Method newMethod = class_getClassMethod(cls, b);
@@ -263,6 +341,7 @@ __attribute__((constructor)) static void CGRBoot(void) {
         CGRSwizzle([NSURLSessionConfiguration class],
                    @selector(ephemeralSessionConfiguration),
                    @selector(cgr_ephemeralSessionConfiguration));
-        CGRLog(@"v0.1.0 loaded: source-written history adapter and attachment probe");
+        CGRSwizzleTaskResume();
+        CGRLog(@"v0.2.0 loaded: IPA-guided request/pagination probe + history adapter");
     }
 }
