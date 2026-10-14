@@ -1,51 +1,59 @@
-# ChatGPT Repair iOS16 — 551UK
+# ChatGPT Repair iOS16 — by 551UK
 
-**Target:** Decrypted official ChatGPT app **1.2024.200**, minimum OS 16.1, on jailbroken **iOS 16 / Dopamine rootless**.
+**Target:** official ChatGPT `1.2024.200` on jailbroken iOS 16 (Dopamine rootless).
 
-The aim is a completely source-maintained 551UK compatibility tweak. **Current released v0.3.0 is an experimental companion, not a verified fix** for sidebar history or the missing upload (+) button. It does not include or redistribute another developer's compiled tweak.
+**Goal:** restore up-to-date conversation history, fully functional attachments in **all existing conversations**, and other compatible features using an independent, maintainable 551UK source project.
 
-## Download
+## Current development status — v0.4.0 diagnostic companion
 
-- **Latest experimental DEB:** [v0.3.0 Releases](https://github.com/551UK/ChatGPT-Repair-iOS16/releases/tag/v0.3.0)
-- **Verified IPA static-analysis findings:** [docs/IPA_ANALYSIS.md](docs/IPA_ANALYSIS.md)
-- Builds are reproducible from this repository using GitHub Actions.
+**Neither missing history nor missing upload buttons is fixed yet.** Do not claim this release as a repair; it is a controlled test following the failed v0.1–v0.3 approaches. Keep the already-working ChatGBeFree 2.3.5 installed until its functionality can be reconstructed and tested in source.
 
-## Findings from the actual IPA
+### Downloads
 
-- The legacy history code uses a paginated request with `offset`, `limit`, `order`, `expand`, `isArchived`, and decodes a response containing `items` and `total`. Its `HistoryViewModel` maintains a separate in-memory list and loads additional pages.
-- The message composer has `_fileUploadBlockedFeature`, `_shouldShowAttachmentsDisabledPopover`, and a flag named `chatgpt-ios-disable-message-attachments`.
-- Conversation metadata contains `blockedFeatures` and an explicit `fileUpload` blocking case.
+- [v0.4.0 experimental release](https://github.com/551UK/ChatGPT-Repair-iOS16/releases/tag/v0.4.0)
+- [Side-by-side analysis: 2024 vs 2026 IPAs](docs/2024_VS_2026_IPA.md)
+- [Earlier IPA analysis](docs/IPA_ANALYSIS.md)
 
-These are **static observations, not proof** of why a particular PC-created chat has no attachment button or a missing chat did not load. Simply forcing a + symbol without a functioning upload action would not constitute a repair.
+## What we learned from both IPA versions
 
-## What v0.3.0 does
+| | 2024 installed app | 2026 comparison app |
+| --- | --- | --- |
+| Minimum OS | iOS 16.1 | **iOS 18.0** |
+| Sidebar | Original history view model, fetchMoreItems() | Revised history and fetchMoreItems(reason:), fetchConversationList(offset:limit:) |
+| Attachment logic | Has fileUpload blocked-feature checking | Still has fileUpload blocked-feature checking; expanded composer |
+| Working on iOS 16 | Yes | Not without extensive unsupported backporting |
 
-- Keeps the v0.1 narrow response adapter for successful conversation-list GET requests.
-- **New:** If a history GET returns HTTP 500 and lacks an archived filter, retries once with `is_archived=false`. Only a successful, decodable list replaces the failed response; otherwise the original error is passed through.
-- Adds a read-only `NSURLSessionTask resume` route probe (when invoked via the hooked implementation) to learn whether the 2024 Swift app requests history, what pagination it sends, and when conversation-detail / init requests occur.
-- Reports statuses and array counts for applicable URLProtocol requests and limited structure information for conversation-detail requests.
-- Logs no conversation IDs, titles, prompts, message contents, authorization headers, cookies or uploads.
+The newer framework **cannot be copied into iOS 16**. Any relevant compatible behaviour needs to be independently implemented against the 2024 app.
 
-**Keep the currently working ChatGBeFree 2.3.5 installed**; this companion has a separate package ID and does not include those voice, model, version-bypass and image features. If the app misbehaves, uninstall just the 551UK package.
+The user has **hundreds of conversations** that do not appear in the 2024 sidebar. A request for `offset=0&limit=20` is normal as an initial page; later pages or updates need to work. The uploaded log shows prior HTTP 500 and timeouts, but the 551UK v0.1–0.3 networking interceptor may itself have interfered with the existing ChatGBeFree 2.3.5 interceptor.
 
-## Exactly how to test
+The missing `+` button affects **every conversation opened from the sidebar**, not only conversations first created on a PC. It works in a brand-new chat started on the phone. The earlier response logs observed conversation messages, not `POST /conversation/init` metadata. We cannot know what disables the button until those are compared.
 
-1. Install v0.3.0 in Sileo over v0.2.0, keeping ChatGBeFree 2.3.5 installed.
-2. Force-close and reopen ChatGPT, open the left sidebar, scroll older chats, and try reopening the sidebar.
-3. Open a conversation that originated on PC and lacks the + button. Then open a conversation started on iPhone that has the button.
-4. Use Filza to open the **ChatGPT app data container** and find `Library/Caches/ChatGPT551Repair.log`.
-5. Send the log and state whether the sidebar had fewer/newer/older missing chats and whether the two attachment buttons differed. **Do not send cookies or account tokens.**
+## What v0.4.0 changes
 
-If the log only says v0.3.0 loaded, the 2024 app may not be using a hooked task method. Compare `history original_500`, `history retry variant=is_archived_false status=... list_valid=...` and the final `history status=...`. If no matching response appears, interception or client transport may be incomplete. Neither history nor upload UI is verified repaired.
+The source code no longer registers a custom `NSURLProtocol`, modifies session configurations, replays network calls, alters request query parameters, changes the JSON body, or fabricates successful responses. It only logs URLSession task route categories/pagination and **when used**, completion-handler response statuses and safely summarized JSON structure.
 
-## Building
+See `src/HistoryRepair.m`. The only writable file is a bounded diagnostic log inside the app's own Caches directory. No chat contents, titles, conversation identifiers, access tokens or full request URLs are logged. If the app uses delegate-based tasks instead of completion blocks, some responses will not be observed — this is **not evidence of server failure**.
 
-In [Actions](../../actions), run the **Build ChatGPT Repair Rootless** workflow, or use Theos on macOS: `make package FINALPACKAGE=1`.
+### Testing (please follow this exact order)
 
-Versioned builds are published to [Releases](../../releases) on successful `main` pushes when the `control` package version is new.
+1. Upgrade only the 551UK tweak to v0.4.0. Keep ChatGBeFree 2.3.5 installed.
+2. Force-close ChatGPT and reopen.
+3. Start **one new conversation within the app** and confirm whether the `+` button works.
+4. Next open **one existing sidebar conversation** and confirm whether its `+` button is missing.
+5. Pull down to refresh sidebar; try scrolling older chats and note whether new items appear.
+6. Use Filza in the ChatGPT data container to find `Library/Caches/ChatGPT551Repair.log`. Share the log (do not share cookies, tokens or private messages).
 
-## Licence and credit
+If the log has `complete route=init` entries, compare `blocked=` and model-field presence between the new and existing conversation. If `complete route=history` is absent, we need a different passive observation point; it does not mean the request timed out.
 
-GPLv3. The original public version-spoofing code and concept come from [ChatGBeFree by Liam](https://github.com/liamschwie/ChatGBeFree), and are credited as required. The source-written diagnostics and compatibility experimentation are maintained by 551UK. The independently editable optional version source remains disabled in the companion to avoid conflicting with 2.3.5.
+If the app becomes unstable, remove only `com.551uk.chatgptrepair`; it is a separate companion and does not delete chats.
 
-Not affiliated with OpenAI.
+## Building / release
+
+Theos / iOS 16.5 SDK; `make package FINALPACKAGE=1`. Pushing a new version to main builds the rootless DEB with GitHub Actions and creates an asset in Releases.
+
+## Long-term independence
+
+Original public version-spoof concept from [ChatGBeFree by Liam](https://github.com/liamschwie/ChatGBeFree), GPLv3, with attribution in LICENSE and source. Later 2.3.5 voice, models and image functionality is not available as complete published source, and **is not currently replicated by the 551UK project**. We will not distribute the private compiled binary as though it were editable source.
+
+This project is not affiliated with OpenAI. UI patches cannot override genuine account, model or server-side capability restrictions.
