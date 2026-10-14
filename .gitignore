@@ -1,0 +1,8 @@
+.theos/
+obj/
+packages/
+.DS_Store
+*.deb
+*.dylib
+*.o
+*.log
