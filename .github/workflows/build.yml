@@ -65,9 +65,9 @@ jobs:
           cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
           ## ChatGPT Repair iOS16 — 551UK
 
-          First experimental rootless companion tweak for **ChatGPT 1.2024.200 on iOS 16**.
+          Experimental diagnostic rootless companion tweak for **ChatGPT 1.2024.200 on iOS 16**.
 
-          - v0.4.0 uses passive network diagnostics only; it does not intercept, rewrite, replay or cache-bypass user requests. This isolates possible conflicts with the existing ChatGBeFree networking hooks.
+          - v0.5.0 observes existing NSURLSession delegate data/completion callbacks, in addition to the earlier task-start probes. No request, response, cache setting or destination is modified.
           - Compares sanitized response structures for history lists and conversation initialization to investigate missing sidebar conversations and attachment controls in all existing chats.
           - All tweak source code and GitHub Actions build scripts are in this repository.
 
