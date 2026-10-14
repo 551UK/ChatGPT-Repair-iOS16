@@ -64,3 +64,17 @@ Compare the response status and **sanitized query parameter names/values** of th
 Treat the existing-chat attachment (+) button as independent: the source-only 551UK project has not yet established the conversation-init metadata that controls it. No active rewrite should be introduced for this feature until its real gate is identified.
 
 **Decision:** keep v0.8.0 as a diagnostic control. Do not publish another speculative DEB based solely on a 28-byte HTTP 500.
+
+
+## Confirmed account-level contrast: desktop web history WORKS
+
+The user explicitly confirms that the same account displays **all hundreds of chats in the ChatGPT browser version**, while legacy iOS 1.2024.200 with ChatGBeFree 2.3.5 displays only a few. This materially weakens the earlier hypothesis of a general account-wide history outage; do not characterize the 28-byte HTTP 500 as proof the user's whole account has a backend fault.
+
+The comparison must be **current working browser request vs. failing iOS 2024 request**, not bypass/no-bypass alone:
+- Browser: record conversation-list request **path**, **query parameter names and non-sensitive values**, HTTP status and whether pagination loads additional pages. Never record browser Authorization, Cookies, access tokens, conversation IDs, titles or response bodies in shared logs.
+- iOS: v0.8.0 logs `offset=0&limit=20`, and its latest run timed out once and returned HTTP 500 twice with 28-byte responses through the original interceptor. The older app's original request parameter **names and values beyond offset/limit** and its transport details remain unverified.
+- Evaluate mismatched request path, archive/star filters, sort order, session authentication scheme, client-identification headers, API/response format and intermediate forwarding. Do not assume which difference is causal without an A/B test.
+- Repeating `offset=0` on manual pull-to-refresh is expected; inability to obtain a first successful page prevents any meaningful test of next-page loading.
+- Do **not** propose reinstalling the ChatGPT app or signing out unless clearly justified: these actions can remove app-local data and won't directly prove why the server rejects the legacy request.
+
+The attachment (+) icon in **all opened existing conversations** remains a separate reproducible issue; newly created local conversations still have the control. Compare corresponding `/conversation/init` responses and the legacy `_fileUploadBlockedFeature` gate only after capturing the actual relevant metadata safely. Cosmetic button insertion alone would not restore uploads.
