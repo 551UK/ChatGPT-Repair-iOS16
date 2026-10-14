@@ -1,418 +1,281 @@
 /*
- * ChatGPT Repair iOS16 — 551UK — GPL-3.0
- * Experimental history compatibility and attachment-related metadata probe.
+ * ChatGPT Repair iOS16 v0.4.0 — 551UK — GPL-3.0
  *
- * No chat messages, titles, conversation IDs, credentials or headers are logged.
- * This package does not include or modify Liam's ChatGBeFree binary.
+ * Passive, privacy-conscious comparison instrumentation for 1.2024.200.
+ * NO NSURLProtocol registration, URLSessionConfiguration mutation, request
+ * replay, fake HTTP success, body replacement or user-data modification.
+ *
+ * ChatGBeFree 2.3.5 also intercepts URLSession; v0.1–0.3 experiments could
+ * interfere with its forwarding and therefore must not be used as proof that
+ * the remote service is broken. This test isolates that risk.
  */
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 
-static NSString *const kCGRHandled = @"com.551uk.ChatGPTRepair.requestHandled";
+typedef NS_ENUM(NSInteger, CGRRoute) {
+    CGRNone = 0, CGRHistory = 1, CGRInit = 2,
+    CGRDetail = 3, CGRMetadata = 4
+};
 
-static void CGRLog(NSString *line) {
-    if (!line) return;
-    @synchronized([NSFileHandle class]) {
-        NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches/ChatGPT551Repair.log"];
-        NSString *message = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], line];
-        NSData *data = [message dataUsingEncoding:NSUTF8StringEncoding];
-        if (![[NSFileManager defaultManager] fileExistsAtPath:path])
-            [[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:nil];
-        NSFileHandle *f = [NSFileHandle fileHandleForWritingAtPath:path];
-        if (!f) return;
-        @try { [f seekToEndOfFile]; [f writeData:data]; }
-        @catch (__unused NSException *e) {}
-        @finally { [f closeFile]; }
+static NSString *CGRRouteName(CGRRoute route) {
+    switch (route) {
+        case CGRHistory: return @"history";
+        case CGRInit: return @"init";
+        case CGRDetail: return @"detail";
+        case CGRMetadata: return @"metadata";
+        default: return @"other";
     }
 }
-
-typedef NS_ENUM(NSInteger, CGRRoute) { CGRRouteNone, CGRRouteHistory, CGRRouteDetail };
 
 static BOOL CGROfficialHost(NSString *host) {
     NSString *h = host.lowercaseString;
-    return [h isEqualToString:@"openai.com"] || [h hasSuffix:@".openai.com"] ||
-           [h isEqualToString:@"chatgpt.com"] || [h hasSuffix:@".chatgpt.com"];
+    if (!h.length) return NO;
+    return [h isEqualToString:@"chatgpt.com"] || [h hasSuffix:@".chatgpt.com"] ||
+           [h isEqualToString:@"openai.com"] || [h hasSuffix:@".openai.com"];
 }
+
 static CGRRoute CGRRouteForRequest(NSURLRequest *request) {
-    if (![[request.HTTPMethod uppercaseString] isEqualToString:@"GET"]) return CGRRouteNone;
-    if (!CGROfficialHost(request.URL.host)) return CGRRouteNone;
-    NSString *path = request.URL.path ?: @"";
-    if ([path isEqualToString:@"/backend-api/conversations"] ||
-        [path isEqualToString:@"/backend-api/conversations/"] ||
-        [path isEqualToString:@"/conversations"] ||
-        [path isEqualToString:@"/conversations/"]) return CGRRouteHistory;
-
-    // Only a single conversation detail GET; not POST streams or voice operations.
-    NSArray<NSString *> *parts = [path componentsSeparatedByString:@"/"];
-    if (parts.count == 4 && [parts[1] isEqualToString:@"backend-api"] &&
-        [parts[2] isEqualToString:@"conversation"] && [parts[3] length] > 0)
-        return CGRRouteDetail;
+    if (!request || !CGROfficialHost(request.URL.host)) return CGRNone;
+    NSString *p = request.URL.path ?: @"";
+    NSString *method = request.HTTPMethod.uppercaseString ?: @"GET";
+    if ([method isEqualToString:@"GET"] &&
+        ([p isEqualToString:@"/backend-api/conversations"] ||
+         [p isEqualToString:@"/backend-api/conversations/"] ||
+         [p isEqualToString:@"/conversations"] ||
+         [p isEqualToString:@"/conversations/"])) return CGRHistory;
+    if ([method isEqualToString:@"POST"] &&
+        ([p isEqualToString:@"/backend-api/conversation/init"] ||
+         [p isEqualToString:@"/conversation/init"])) return CGRInit;
+    if ([method isEqualToString:@"GET"] &&
+        ([p containsString:@"conversation_detail_metadata"] ||
+         [p containsString:@"conversation-detail-metadata"])) return CGRMetadata;
+    if (![method isEqualToString:@"GET"]) return CGRNone;
+    NSArray *parts = [p componentsSeparatedByString:@"/"];
+    if (parts.count == 4 &&
+        [parts[1] isEqualToString:@"backend-api"] &&
+        [parts[2] isEqualToString:@"conversation"] &&
+        [parts[3] length]) return CGRDetail;
     if (parts.count == 3 && [parts[1] isEqualToString:@"conversation"] &&
-        [parts[2] length] > 0) return CGRRouteDetail;
-    return CGRRouteNone;
-}
-static NSArray *CGRAlternativeItems(NSDictionary *root) {
-    id v = root[@"conversations"];
-    if ([v isKindOfClass:[NSArray class]]) return v;
-    id inner = root[@"data"];
-    if (![inner isKindOfClass:[NSDictionary class]]) return nil;
-    v = inner[@"items"];
-    if ([v isKindOfClass:[NSArray class]]) return v;
-    v = inner[@"conversations"];
-    return [v isKindOfClass:[NSArray class]] ? v : nil;
+        [parts[2] length]) return CGRDetail;
+    return CGRNone;
 }
 
-static NSString *CGRModelCategory(NSDictionary *root) {
-    id model = root[@"model_slug"] ?: root[@"default_model_slug"] ?: root[@"model"];
-    if ([model isKindOfClass:[NSDictionary class]]) {
-        model = model[@"slug"] ?: model[@"id"];
-    }
-    if (![model isKindOfClass:[NSString class]]) {
-        id mapping = root[@"mapping"];
-        id currentNode = root[@"current_node"];
-        if ([mapping isKindOfClass:[NSDictionary class]] &&
-            [currentNode isKindOfClass:[NSString class]]) {
-            id node = mapping[currentNode];
-            if ([node isKindOfClass:[NSDictionary class]]) {
-                id msg = node[@"message"];
-                id meta = [msg isKindOfClass:[NSDictionary class]] ? msg[@"metadata"] : nil;
-                if ([meta isKindOfClass:[NSDictionary class]]) model = meta[@"model_slug"];
-            }
+static void CGRLog(NSString *line) {
+    if (!line.length) return;
+    @synchronized([NSFileHandle class]) {
+        NSString *directory = [NSHomeDirectory()
+            stringByAppendingPathComponent:@"Library/Caches"];
+        NSString *path = [directory
+            stringByAppendingPathComponent:@"ChatGPT551Repair.log"];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSDictionary *attrs = [fm attributesOfItemAtPath:path error:NULL];
+        if ([attrs fileSize] > 512 * 1024) {
+            [fm removeItemAtPath:path error:NULL]; // simple size-bound rollover
         }
-    }
-    if (![model isKindOfClass:[NSString class]]) return @"missing";
-    NSString *s = [(NSString *)model lowercaseString];
-    if ([s hasPrefix:@"gpt-4"] || [s hasPrefix:@"gpt-3"]) return @"legacy-gpt";
-    if ([s hasPrefix:@"gpt-5"] || [s hasPrefix:@"gpt-6"]) return @"newer-gpt";
-    if ([s hasPrefix:@"o1"] || [s hasPrefix:@"o3"] || [s hasPrefix:@"o4"]) return @"reasoning";
-    return @"other";
-}
-
-static NSData *CGRRewriteIfSafe(NSData *data, NSURLResponse *response, CGRRoute route) {
-    if (!data || data.length > 5 * 1024 * 1024 ||
-        ![response isKindOfClass:[NSHTTPURLResponse class]]) return data;
-    if (((NSHTTPURLResponse *)response).statusCode != 200) return data;
-    id root = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
-    if (![root isKindOfClass:[NSDictionary class]]) {
-        CGRLog(route == CGRRouteHistory ? @"history invalid JSON envelope" :
-                                            @"detail invalid JSON envelope");
-        return data;
-    }
-    NSDictionary *j = (NSDictionary *)root;
-    if (route == CGRRouteDetail) {
-        // Compare the structural presence of fields across web- vs app-created chats.
-        // No values, content, model names, or identifiers leave the device.
-        NSMutableArray *found = [NSMutableArray array];
-        for (NSString *key in @[@"model_slug", @"model", @"supports_attachments",
-                               @"can_upload", @"capabilities", @"mapping",
-                               @"current_node", @"conversation_template_id"]) {
-            if (j[key] != nil) [found addObject:key];
+        if (![fm fileExistsAtPath:path]) {
+            [fm createFileAtPath:path contents:nil attributes:nil];
         }
-        CGRLog([NSString stringWithFormat:@"detail model_category=%@ fields=%@",
-                CGRModelCategory(j), [found componentsJoinedByString:@","]]);
-        return data;
-    }
-    id native = j[@"items"];
-    if ([native isKindOfClass:[NSArray class]]) {
-        CGRLog([NSString stringWithFormat:@"history native items=%lu",
-                (unsigned long)[native count]]);
-        return data;
-    }
-    NSArray *alternative = CGRAlternativeItems(j);
-    if (!alternative) {
-        NSMutableArray *known = [NSMutableArray array];
-        for (NSString *key in @[@"data", @"conversations", @"items",
-                                @"total", @"offset", @"limit", @"cursor"]) {
-            if (j[key] != nil) [known addObject:key];
-        }
-        CGRLog([NSString stringWithFormat:@"history unknown format fields=%@",
-                [known componentsJoinedByString:@","]]);
-        return data;
-    }
-    NSMutableDictionary *converted = [j mutableCopy];
-    converted[@"items"] = alternative;
-    if (!converted[@"total"]) converted[@"total"] = @(alternative.count);
-    if (!converted[@"offset"]) converted[@"offset"] = @0;
-    if (!converted[@"limit"]) converted[@"limit"] = @(alternative.count);
-    NSData *result = [NSJSONSerialization dataWithJSONObject:converted options:0 error:NULL];
-    if (!result) return data;
-    CGRLog([NSString stringWithFormat:@"history converted items=%lu",
-            (unsigned long)alternative.count]);
-    return result;
-}
-
-@interface CGRHistoryProtocol : NSURLProtocol
-@property (nonatomic, strong) NSURLSession *cgrSession;
-@property (nonatomic, strong) NSURLSessionDataTask *cgrTask;
-@property (nonatomic, assign) BOOL cgrStopped;
-@end
-
-@implementation CGRHistoryProtocol
-+ (BOOL)canInitWithRequest:(NSURLRequest *)request {
-    if ([NSURLProtocol propertyForKey:kCGRHandled inRequest:request]) return NO;
-    return CGRRouteForRequest(request) != CGRRouteNone;
-}
-+ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
-- (void)cgrCompleteWithData:(NSData *)data
-                   response:(NSURLResponse *)response
-                      error:(NSError *)error
-                      route:(CGRRoute)route {
-    if (self.cgrStopped) return;
-    id<NSURLProtocolClient> client = self.client;
-    NSString *label = route == CGRRouteHistory ? @"history" : @"detail";
-    if (error) {
-        CGRLog([NSString stringWithFormat:@"%@ network_error=%ld", label,
-                (long)error.code]);
-        [client URLProtocol:self didFailWithError:error];
-    } else if (!response) {
-        [client URLProtocol:self didFailWithError:
-           [NSError errorWithDomain:NSURLErrorDomain
-                               code:NSURLErrorUnknown userInfo:nil]];
-    } else {
-        NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
-            ? [(NSHTTPURLResponse *)response statusCode] : 0;
-        CGRLog([NSString stringWithFormat:@"%@ status=%ld bytes=%lu",
-                label, (long)status, (unsigned long)data.length]);
-        NSData *output = CGRRewriteIfSafe(data, response, route);
-        NSURLResponse *sent = response;
-        if (output != data && [response isKindOfClass:[NSHTTPURLResponse class]]) {
-            NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
-            NSMutableDictionary *headers = [http.allHeaderFields mutableCopy];
-            for (NSString *key in [headers allKeys]) {
-                if ([key caseInsensitiveCompare:@"Content-Length"] == NSOrderedSame ||
-                    [key caseInsensitiveCompare:@"Content-Encoding"] == NSOrderedSame ||
-                    [key caseInsensitiveCompare:@"Content-MD5"] == NSOrderedSame)
-                    [headers removeObjectForKey:key];
-            }
-            sent = [[NSHTTPURLResponse alloc] initWithURL:http.URL
-                   statusCode:http.statusCode HTTPVersion:@"HTTP/1.1"
-                   headerFields:headers];
-        }
-        [client URLProtocol:self didReceiveResponse:sent
-                 cacheStoragePolicy:NSURLCacheStorageNotAllowed];
-        if (output.length) [client URLProtocol:self didLoadData:output];
-        [client URLProtocolDidFinishLoading:self];
-    }
-    [self.cgrSession finishTasksAndInvalidate];
-    self.cgrTask = nil;
-}
-
-/* A 500 might be caused by old optional query defaults.
- * Retry once with an explicit non-archived filter. If it does not return a
- * decodable list, deliver the ORIGINAL server reply, unchanged.
- * This never fabricates a conversation, authentication token, or success.
- */
-- (void)startLoading {
-    self.cgrStopped = NO;
-    CGRRoute route = CGRRouteForRequest(self.request);
-    if (route == CGRRouteNone) return;
-    NSMutableURLRequest *copy = [self.request mutableCopy];
-    [NSURLProtocol setProperty:@YES forKey:kCGRHandled inRequest:copy];
-    if (route == CGRRouteHistory) {
-        copy.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
-        [copy setValue:nil forHTTPHeaderField:@"If-None-Match"];
-        [copy setValue:nil forHTTPHeaderField:@"If-Modified-Since"];
-    }
-    self.cgrSession = [NSURLSession sessionWithConfiguration:
-                       [NSURLSessionConfiguration ephemeralSessionConfiguration]];
-    __weak typeof(self) weakSelf = self;
-    self.cgrTask = [self.cgrSession dataTaskWithRequest:copy
-      completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf || strongSelf.cgrStopped) return;
-
-        NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
-            ? [(NSHTTPURLResponse *)response statusCode] : 0;
-        NSURLComponents *components = [NSURLComponents componentsWithURL:copy.URL
-                                               resolvingAgainstBaseURL:NO];
-        BOOL archivedAlreadySpecified = NO;
-        for (NSURLQueryItem *item in components.queryItems) {
-            if ([item.name isEqualToString:@"is_archived"]) {
-                archivedAlreadySpecified = YES;
-                break;
-            }
-        }
-        if (route == CGRRouteHistory && !error && status == 500 &&
-            components && !archivedAlreadySpecified) {
-            // Test only the observed missing flag. Preserve pagination, ordering,
-            // cookies, account headers, and the original request otherwise.
-            NSMutableArray<NSURLQueryItem *> *query =
-                [components.queryItems mutableCopy] ?: [NSMutableArray array];
-            [query addObject:[NSURLQueryItem queryItemWithName:@"is_archived"
-                                                         value:@"false"]];
-            components.queryItems = query;
-            NSMutableURLRequest *alternative = [copy mutableCopy];
-            alternative.URL = components.URL;
-            alternative.timeoutInterval = 12;
-            if (!alternative.URL) {
-                [strongSelf cgrCompleteWithData:data response:response
-                                          error:error route:route];
-                return;
-            }
-            CGRLog(@"history original_500; retrying_once variant=is_archived_false");
-            strongSelf.cgrTask = [strongSelf.cgrSession dataTaskWithRequest:alternative
-              completionHandler:^(NSData *retryData, NSURLResponse *retryResponse,
-                                  NSError *retryError) {
-                __strong typeof(weakSelf) again = weakSelf;
-                if (!again || again.cgrStopped) return;
-                NSInteger retryStatus = [retryResponse isKindOfClass:
-                                            [NSHTTPURLResponse class]]
-                    ? [(NSHTTPURLResponse *)retryResponse statusCode] : 0;
-                id retryJSON = retryData
-                    ? [NSJSONSerialization JSONObjectWithData:retryData
-                                                      options:0 error:NULL] : nil;
-                BOOL listOK = [retryJSON isKindOfClass:[NSDictionary class]] &&
-                    ([retryJSON[@"items"] isKindOfClass:[NSArray class]] ||
-                     CGRAlternativeItems(retryJSON) != nil);
-                CGRLog([NSString stringWithFormat:
-                   @"history retry variant=is_archived_false status=%ld network_error=%ld list_valid=%d",
-                   (long)retryStatus, (long)retryError.code, (int)listOK]);
-                if (!retryError && retryStatus == 200 && listOK) {
-                    [again cgrCompleteWithData:retryData response:retryResponse
-                                         error:nil route:route];
-                } else {
-                    [again cgrCompleteWithData:data response:response
-                                         error:error route:route];
-                }
-              }];
-            [strongSelf.cgrTask resume];
-            return;
-        }
-        [strongSelf cgrCompleteWithData:data response:response
-                                  error:error route:route];
-    }];
-    [self.cgrTask resume];
-}
-- (void)stopLoading {
-    self.cgrStopped = YES;
-    [self.cgrTask cancel];
-    [self.cgrSession invalidateAndCancel];
-    self.cgrTask = nil;
-    self.cgrSession = nil;
-}
-@end
-
-static void CGRInsert(NSURLSessionConfiguration *cfg) {
-    if (!cfg) return;
-    NSArray *classes = cfg.protocolClasses ?: @[];
-    if (![classes containsObject:[CGRHistoryProtocol class]]) {
-        cfg.protocolClasses = [@[[CGRHistoryProtocol class]]
-                                arrayByAddingObjectsFromArray:classes];
+        NSData *bytes = [[NSString stringWithFormat:@"%@ %@\n",
+            [NSDate date], line] dataUsingEncoding:NSUTF8StringEncoding];
+        NSFileHandle *out = [NSFileHandle fileHandleForWritingAtPath:path];
+        if (!out) return;
+        @try { [out seekToEndOfFile]; [out writeData:bytes]; }
+        @catch (__unused NSException *e) {}
+        @finally { [out closeFile]; }
     }
 }
 
-@interface NSURLSessionConfiguration (CGRCompatibility)
-+ (NSURLSessionConfiguration *)cgr_defaultSessionConfiguration;
-+ (NSURLSessionConfiguration *)cgr_ephemeralSessionConfiguration;
-@end
-@implementation NSURLSessionConfiguration (CGRCompatibility)
-+ (NSURLSessionConfiguration *)cgr_defaultSessionConfiguration {
-    NSURLSessionConfiguration *cfg = [self cgr_defaultSessionConfiguration];
-    CGRInsert(cfg);
-    return cfg;
+static NSString *CGRPage(NSURL *url, NSString *name) {
+    NSURLComponents *p = [NSURLComponents componentsWithURL:url
+                                    resolvingAgainstBaseURL:NO];
+    for (NSURLQueryItem *item in p.queryItems) {
+        if (![item.name isEqualToString:name]) continue;
+        NSString *s = item.value ?: @"";
+        if (!s.length || s.length > 7 ||
+            [s rangeOfCharacterFromSet:
+              [[NSCharacterSet decimalDigitCharacterSet] invertedSet]].location
+              != NSNotFound) return @"invalid";
+        return s;
+    }
+    return @"absent";
 }
-+ (NSURLSessionConfiguration *)cgr_ephemeralSessionConfiguration {
-    NSURLSessionConfiguration *cfg = [self cgr_ephemeralSessionConfiguration];
-    CGRInsert(cfg);
-    return cfg;
-}
-@end
 
-/*
- * IPA-grounded request probe. NSURLProtocol only observes sessions where the
- * client has registered it; the Swift client also uses its own task delegates.
- * An NSURLSessionTask resume hook supplies route/pagination evidence without
- * reading message bodies, request headers, cookies or conversation IDs.
- */
-static NSString *CGRProbeLabel(NSURLRequest *request) {
-    NSURL *url = request.URL;
-    if (!CGROfficialHost(url.host)) return nil;
-    NSString *p = url.path ?: @"";
-    if ([p isEqualToString:@"/backend-api/conversations"] ||
-        [p isEqualToString:@"/conversations"] ||
-        [p isEqualToString:@"/backend-api/conversations/"] ||
-        [p isEqualToString:@"/conversations/"]) return @"history-list";
-    if ([p isEqualToString:@"/backend-api/conversation/init"] ||
-        [p isEqualToString:@"/conversation/init"]) return @"conversation-init";
-    if ([p isEqualToString:@"/backend-api/conversation"] ||
-        [p isEqualToString:@"/conversation"]) return @"conversation-send";
-    if ([p containsString:@"conversation_detail_metadata"] ||
-        [p containsString:@"conversation-detail-metadata"] ||
-        [p containsString:@"conversation_detail"]) return @"conversation-metadata";
-    if (([p hasPrefix:@"/backend-api/conversation/"] ||
-         [p hasPrefix:@"/conversation/"]) &&
-        ![p containsString:@"/voice/"]) return @"conversation-detail";
+static BOOL CGRHasKey(NSDictionary *object, NSString *key) {
+    return object[key] != nil && object[key] != [NSNull null];
+}
+static id CGRFirstKey(NSDictionary *object, NSArray<NSString *> *keys) {
+    if (![object isKindOfClass:[NSDictionary class]]) return nil;
+    for (NSString *key in keys) if (CGRHasKey(object,key)) return object[key];
     return nil;
 }
 
-static NSString *CGRSafePageValue(NSURL *url, NSString *key) {
-    NSURLComponents *parts = [NSURLComponents componentsWithURL:url
-                                        resolvingAgainstBaseURL:NO];
-    for (NSURLQueryItem *q in parts.queryItems) {
-        if (![q.name isEqualToString:key]) continue;
-        NSString *v = q.value ?: @"";
-        if (v.length == 0 || v.length > 7) return @"invalid";
-        NSCharacterSet *notDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
-        return [v rangeOfCharacterFromSet:notDigits].location == NSNotFound ? v : @"invalid";
-    }
-    return @"-";
-}
-
-@interface NSURLSessionTask (CGRIPARequestProbe)
-- (void)cgr_probeResume;
-@end
-
-@implementation NSURLSessionTask (CGRIPARequestProbe)
-- (void)cgr_probeResume {
-    NSURLRequest *request = self.currentRequest ?: self.originalRequest;
-    NSString *category = CGRProbeLabel(request);
-    if (category) {
-        NSString *method = [request.HTTPMethod.uppercaseString isEqualToString:@"POST"]
-            ? @"POST" : @"GET";
-        if ([category isEqualToString:@"history-list"]) {
-            CGRLog([NSString stringWithFormat:
-                @"probe route=%@ method=%@ offset=%@ limit=%@ order_present=%d archived_present=%d",
-                category, method,
-                CGRSafePageValue(request.URL, @"offset"),
-                CGRSafePageValue(request.URL, @"limit"),
-                (int)([NSURLComponents componentsWithURL:request.URL
-                  resolvingAgainstBaseURL:NO].queryItems
-                  ? [[request.URL.query lowercaseString] containsString:@"order="] : NO),
-                (int)[[request.URL.query lowercaseString] containsString:@"is_archived="]]);
-        } else {
-            CGRLog([NSString stringWithFormat:@"probe route=%@ method=%@",
-                   category, method]);
+static NSString *CGRBlockedType(id value) {
+    if (!value || value == [NSNull null]) return @"absent";
+    if ([value isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = value;
+        BOOL upload = NO;
+        for (NSString *key in dict) {
+            if ([key.lowercaseString containsString:@"fileupload"] ||
+                [key.lowercaseString containsString:@"file_upload"]) {
+                upload = YES; break;
+            }
         }
+        return upload ? @"dict-upload-key" : @"dict-other";
     }
-    [self cgr_probeResume];
+    if ([value isKindOfClass:[NSArray class]]) {
+        BOOL upload = NO;
+        for (id element in value) {
+            if ([element isKindOfClass:[NSString class]] &&
+                [[element lowercaseString] containsString:@"file"]) upload = YES;
+            if ([element isKindOfClass:[NSDictionary class]]) {
+                NSDictionary *d = element;
+                for (NSString *key in @[@"feature", @"type", @"name"]) {
+                    id feature = d[key];
+                    if ([feature isKindOfClass:[NSString class]] &&
+                        [[feature lowercaseString] containsString:@"file"]) {
+                        upload = YES;
+                    }
+                }
+            }
+        }
+        return upload ? @"array-file-entry" : @"array-other";
+    }
+    return @"other";
+}
+
+/* No raw model names, IDs, titles, message bodies, tokens, headers or URLs. */
+static void CGRInspect(NSURLRequest *request, NSData *data,
+                       NSURLResponse *response, NSError *error) {
+    CGRRoute route = CGRRouteForRequest(request);
+    if (route == CGRNone) return;
+    NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
+        ? [(NSHTTPURLResponse *)response statusCode] : 0;
+    NSString *prefix = CGRRouteName(route);
+    CGRLog([NSString stringWithFormat:
+        @"complete route=%@ status=%ld bytes=%lu error_code=%ld",
+        prefix, (long)status, (unsigned long)data.length,
+        (long)(error ? error.code : 0)]);
+    if (data.length == 0 || data.length > 6 * 1024 * 1024) return;
+    id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+    if (![json isKindOfClass:[NSDictionary class]]) {
+        CGRLog([NSString stringWithFormat:
+            @"structure route=%@ json_dictionary=0", prefix]);
+        return;
+    }
+    NSDictionary *root = json;
+    if (route == CGRHistory) {
+        id items = root[@"items"];
+        if (![items isKindOfClass:[NSArray class]]) items = root[@"conversations"];
+        id inner = root[@"data"];
+        if (![items isKindOfClass:[NSArray class]] &&
+            [inner isKindOfClass:[NSDictionary class]])
+            items = CGRFirstKey(inner, @[@"items", @"conversations"]);
+        CGRLog([NSString stringWithFormat:
+            @"structure history items_array=%d count=%ld total_present=%d cursor_present=%d",
+            (int)[items isKindOfClass:[NSArray class]],
+            (long)([items isKindOfClass:[NSArray class]] ? [items count] : -1),
+            (int)CGRHasKey(root, @"total"),
+            (int)(CGRHasKey(root, @"cursor") || CGRHasKey(root, @"next_cursor"))]);
+    }
+    if (route == CGRInit || route == CGRMetadata) {
+        id details = CGRFirstKey(root, @[@"conversation_detail_metadata",
+                  @"conversationDetailMetadata", @"conversation", @"data"]);
+        if (![details isKindOfClass:[NSDictionary class]]) details = root;
+        NSDictionary *d = details;
+        id blocked = CGRFirstKey(d, @[@"blockedFeatures", @"blocked_features"]);
+        if (!blocked && d != root)
+            blocked = CGRFirstKey(root, @[@"blockedFeatures", @"blocked_features"]);
+        CGRLog([NSString stringWithFormat:
+            @"structure route=%@ has_default_model=%d has_model_limits=%d blocked=%@",
+            prefix,
+            (int)(CGRHasKey(d, @"defaultModelSlug") ||
+                  CGRHasKey(d, @"default_model_slug")),
+            (int)(CGRHasKey(d, @"modelLimits") ||
+                  CGRHasKey(d, @"model_limits")),
+            CGRBlockedType(blocked)]);
+    }
+    if (route == CGRDetail) {
+        CGRLog([NSString stringWithFormat:
+            @"structure detail has_mapping=%d has_current_node=%d has_blocked=%d",
+            (int)CGRHasKey(root, @"mapping"),
+            (int)CGRHasKey(root, @"current_node"),
+            (int)(CGRHasKey(root, @"blockedFeatures") ||
+                  CGRHasKey(root, @"blocked_features"))]);
+    }
+}
+
+@interface NSURLSession (CGRPassive)
+- (NSURLSessionDataTask *)cgr_observeDataTaskWithRequest:(NSURLRequest *)request
+    completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completion;
+- (NSURLSessionDataTask *)cgr_observeDataTaskWithURL:(NSURL *)url
+    completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completion;
+@end
+@implementation NSURLSession (CGRPassive)
+- (NSURLSessionDataTask *)cgr_observeDataTaskWithRequest:(NSURLRequest *)request
+    completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completion {
+    if (!completion || CGRRouteForRequest(request) == CGRNone)
+        return [self cgr_observeDataTaskWithRequest:request completionHandler:completion];
+    void (^observed)(NSData *, NSURLResponse *, NSError *) =
+        ^(NSData *data, NSURLResponse *response, NSError *error) {
+            CGRInspect(request, data, response, error);
+            completion(data, response, error);
+        };
+    return [self cgr_observeDataTaskWithRequest:request completionHandler:observed];
+}
+- (NSURLSessionDataTask *)cgr_observeDataTaskWithURL:(NSURL *)url
+    completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completion {
+    NSURLRequest *request = [NSURLRequest requestWithURL:url];
+    if (!completion || CGRRouteForRequest(request) == CGRNone)
+        return [self cgr_observeDataTaskWithURL:url completionHandler:completion];
+    void (^observed)(NSData *, NSURLResponse *, NSError *) =
+        ^(NSData *data, NSURLResponse *response, NSError *error) {
+            CGRInspect(request, data, response, error);
+            completion(data, response, error);
+        };
+    return [self cgr_observeDataTaskWithURL:url completionHandler:observed];
 }
 @end
 
-static void CGRSwizzleTaskResume(void) {
-    Method original = class_getInstanceMethod([NSURLSessionTask class],
-                                             @selector(resume));
-    Method replacement = class_getInstanceMethod([NSURLSessionTask class],
-                                                @selector(cgr_probeResume));
-    if (original && replacement) method_exchangeImplementations(original, replacement);
+@interface NSURLSessionTask (CGRPassiveTask)
+- (void)cgr_observeResume;
+@end
+@implementation NSURLSessionTask (CGRPassiveTask)
+- (void)cgr_observeResume {
+    NSURLRequest *request = self.currentRequest ?: self.originalRequest;
+    CGRRoute route = CGRRouteForRequest(request);
+    if (route == CGRHistory) {
+        CGRLog([NSString stringWithFormat:
+            @"start history offset=%@ limit=%@",
+            CGRPage(request.URL, @"offset"), CGRPage(request.URL, @"limit")]);
+    } else if (route == CGRInit || route == CGRMetadata) {
+        CGRLog([NSString stringWithFormat:@"start route=%@", CGRRouteName(route)]);
+    }
+    [self cgr_observeResume];
+}
+@end
+
+static BOOL CGRSwap(Class cls, SEL a, SEL b) {
+    Method old = class_getInstanceMethod(cls, a);
+    Method new = class_getInstanceMethod(cls, b);
+    if (!old || !new) return NO;
+    method_exchangeImplementations(old, new);
+    return YES;
 }
 
-static void CGRSwizzle(Class cls, SEL a, SEL b) {
-    Method oldMethod = class_getClassMethod(cls, a);
-    Method newMethod = class_getClassMethod(cls, b);
-    if (oldMethod && newMethod) method_exchangeImplementations(oldMethod, newMethod);
-}
-
-__attribute__((constructor)) static void CGRBoot(void) {
+__attribute__((constructor)) static void CGRInitProbe(void) {
     @autoreleasepool {
-        if (![[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.openai.chat"]) return;
-        [NSURLProtocol registerClass:[CGRHistoryProtocol class]];
-        CGRSwizzle([NSURLSessionConfiguration class],
-                   @selector(defaultSessionConfiguration),
-                   @selector(cgr_defaultSessionConfiguration));
-        CGRSwizzle([NSURLSessionConfiguration class],
-                   @selector(ephemeralSessionConfiguration),
-                   @selector(cgr_ephemeralSessionConfiguration));
-        CGRSwizzleTaskResume();
-        CGRLog(@"v0.3.0 loaded: history 500 fallback experiment + attachment diagnostics");
+        if (![[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.openai.chat"])
+            return;
+        BOOL request = CGRSwap([NSURLSession class],
+            @selector(dataTaskWithRequest:completionHandler:),
+            @selector(cgr_observeDataTaskWithRequest:completionHandler:));
+        BOOL url = CGRSwap([NSURLSession class],
+            @selector(dataTaskWithURL:completionHandler:),
+            @selector(cgr_observeDataTaskWithURL:completionHandler:));
+        BOOL resume = CGRSwap([NSURLSessionTask class],
+            @selector(resume), @selector(cgr_observeResume));
+        CGRLog([NSString stringWithFormat:
+            @"v0.4.0 passive compare loaded request_hook=%d url_hook=%d resume_hook=%d no_network_rewriting=1",
+            (int)request, (int)url, (int)resume]);
     }
 }
