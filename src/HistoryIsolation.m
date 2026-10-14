@@ -1,10 +1,10 @@
 /*
  * ChatGPT Repair iOS16 / 551UK
- * v0.6.0 isolated history networking experiment (GPL-3.0).
+ * v0.8.0 original history-interceptor control experiment (GPL-3.0).
  *
  * Unlike earlier URLProtocol wrappers, this source does not copy or repackage
- * Liam's dylib. It only asks its Objective-C protocol not to claim the exact
- * read-only conversation-list GETs. Everything else remains unchanged.
+ * Liam's dylib. This controlled test observes the original protocol's
+ * response without bypassing it. It leaves every request unchanged.
  */
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
@@ -66,10 +66,10 @@ static BOOL CGRLegacyCanInit(id cls, SEL selector, NSURLRequest *request) {
     BOOL original = sOriginalCanInit ? sOriginalCanInit(cls, selector, request) : NO;
     if (CGRHistoryRequest(request)) {
         CGRLog([NSString stringWithFormat:
-            @"v0.6 protocol_probe history original_would_intercept=%d force_bypass=1 offset=%@ limit=%@",
+            @"v0.8 protocol_probe history original_would_intercept=%d force_bypass=0 offset=%@ limit=%@",
             (int)original, CGRPage(request.URL, @"offset"),
             CGRPage(request.URL, @"limit")]);
-        return NO;
+        return original;
     }
     return original;
 }
@@ -103,7 +103,7 @@ static NSUInteger sCGRHistoryTaskSequence = 0;
             _observing = YES;
         } @catch (__unused NSException *ex) {
             CGRLog([NSString stringWithFormat:
-                @"v0.7 history_task=%lu state_observer_unavailable",
+                @"v0.8 history_task=%lu state_observer_unavailable",
                 (unsigned long)_sequence]);
         }
     }
@@ -137,7 +137,7 @@ static NSUInteger sCGRHistoryTaskSequence = 0;
         ? ((NSHTTPURLResponse *)response).statusCode : 0;
     NSError *error = task.error;
     CGRLog([NSString stringWithFormat:
-        @"v0.7 history_task=%lu completed=1 http_status=%ld error_code=%ld received_bytes=%lld",
+        @"v0.8 history_task=%lu completed=1 http_status=%ld error_code=%ld received_bytes=%lld",
         (unsigned long)_sequence, (long)status, (long)(error ? error.code : 0),
         (long long)task.countOfBytesReceived]);
     [self stop];
@@ -160,7 +160,7 @@ static NSUInteger sCGRHistoryTaskSequence = 0;
                 objc_setAssociatedObject(self, &kCGRStateObserverKey, observer,
                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 CGRLog([NSString stringWithFormat:
-                    @"v0.7 history_task=%lu started offset=%@ limit=%@ kvo=%d",
+                    @"v0.8 history_task=%lu started offset=%@ limit=%@ kvo=%d",
                     (unsigned long)next, CGRPage(request.URL, @"offset"),
                     CGRPage(request.URL, @"limit"), (int)observer.observing]);
             }
@@ -170,20 +170,20 @@ static NSUInteger sCGRHistoryTaskSequence = 0;
 }
 @end
 
-static void CGRInstallHistoryInterceptorBypass(void) {
+static void CGRInstallHistoryInterceptorProbe(void) {
     Class protocolClass = objc_getClass("LVBVoiceURLProtocol");
     if (!protocolClass) {
-        CGRLog(@"v0.6 LVBVoiceURLProtocol class missing: no bypass installed");
+        CGRLog(@"v0.8 LVBVoiceURLProtocol class missing: no bypass installed");
         return;
     }
     Method old = class_getClassMethod(protocolClass, @selector(canInitWithRequest:));
     if (!old) {
-        CGRLog(@"v0.6 +canInitWithRequest: missing: no bypass installed");
+        CGRLog(@"v0.8 +canInitWithRequest: missing: no bypass installed");
         return;
     }
     sOriginalCanInit = (CGRCanInitIMP)method_getImplementation(old);
     if (!sOriginalCanInit || sOriginalCanInit == (CGRCanInitIMP)CGRLegacyCanInit) {
-        CGRLog(@"v0.6 original interceptor unavailable: no bypass installed");
+        CGRLog(@"v0.8 original interceptor unavailable: no bypass installed");
         return;
     }
     // Install a method on the specific metaclass; leave NSURLProtocol and every
@@ -192,14 +192,14 @@ static void CGRInstallHistoryInterceptorBypass(void) {
     class_replaceMethod(object_getClass(protocolClass),
                         @selector(canInitWithRequest:),
                         (IMP)CGRLegacyCanInit, encoding);
-    CGRLog(@"v0.6 original protocol located; conversation-list GET bypass installed");
+    CGRLog(@"v0.8 original protocol located; passive history probe installed; bypass=0");
 }
 
 __attribute__((constructor)) static void CGRStart(void) {
     @autoreleasepool {
         if (![[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.openai.chat"]) return;
-        CGRLog(@"v0.6.0 isolated history test loaded; no response rewriting or new URLProtocol");
-        CGRInstallHistoryInterceptorBypass();
+        CGRLog(@"v0.8.0 control loaded; original history interceptor preserved; no network changes");
+        CGRInstallHistoryInterceptorProbe();
         Method m = class_getInstanceMethod([NSURLSessionTask class], @selector(resume));
         Method ours = class_getInstanceMethod([NSURLSessionTask class],
                                                @selector(cgr_historyResume));
