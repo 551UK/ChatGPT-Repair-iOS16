@@ -62,6 +62,32 @@ static NSArray *CGRAlternativeItems(NSDictionary *root) {
     return [v isKindOfClass:[NSArray class]] ? v : nil;
 }
 
+static NSString *CGRModelCategory(NSDictionary *root) {
+    id model = root[@"model_slug"] ?: root[@"default_model_slug"] ?: root[@"model"];
+    if ([model isKindOfClass:[NSDictionary class]]) {
+        model = model[@"slug"] ?: model[@"id"];
+    }
+    if (![model isKindOfClass:[NSString class]]) {
+        id mapping = root[@"mapping"];
+        id currentNode = root[@"current_node"];
+        if ([mapping isKindOfClass:[NSDictionary class]] &&
+            [currentNode isKindOfClass:[NSString class]]) {
+            id node = mapping[currentNode];
+            if ([node isKindOfClass:[NSDictionary class]]) {
+                id msg = node[@"message"];
+                id meta = [msg isKindOfClass:[NSDictionary class]] ? msg[@"metadata"] : nil;
+                if ([meta isKindOfClass:[NSDictionary class]]) model = meta[@"model_slug"];
+            }
+        }
+    }
+    if (![model isKindOfClass:[NSString class]]) return @"missing";
+    NSString *s = [(NSString *)model lowercaseString];
+    if ([s hasPrefix:@"gpt-4"] || [s hasPrefix:@"gpt-3"]) return @"legacy-gpt";
+    if ([s hasPrefix:@"gpt-5"] || [s hasPrefix:@"gpt-6"]) return @"newer-gpt";
+    if ([s hasPrefix:@"o1"] || [s hasPrefix:@"o3"] || [s hasPrefix:@"o4"]) return @"reasoning";
+    return @"other";
+}
+
 static NSData *CGRRewriteIfSafe(NSData *data, NSURLResponse *response, CGRRoute route) {
     if (!data || data.length > 5 * 1024 * 1024 ||
         ![response isKindOfClass:[NSHTTPURLResponse class]]) return data;
@@ -82,8 +108,8 @@ static NSData *CGRRewriteIfSafe(NSData *data, NSURLResponse *response, CGRRoute 
                                @"current_node", @"conversation_template_id"]) {
             if (j[key] != nil) [found addObject:key];
         }
-        CGRLog([NSString stringWithFormat:@"detail fields=%@",
-                [found componentsJoinedByString:@","]]);
+        CGRLog([NSString stringWithFormat:@"detail model_category=%@ fields=%@",
+                CGRModelCategory(j), [found componentsJoinedByString:@","]]);
         return data;
     }
     id native = j[@"items"];
