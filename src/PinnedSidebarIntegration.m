@@ -380,10 +380,8 @@ static CGFloat CGInsertionY(UICollectionView *list) {
         return NO;
     });
     CGFloat anchor=NAN;
-    NSString *source=@"none";
     if (heading) {
         anchor=CGContentYOfView(heading,list,NO);
-        source=@"date_accessibility";
     }
     // A visible Explore GPTs shortcut is the most reliable boundary when
     // SwiftUI does not expose the Today heading as a UIKit label.
@@ -393,7 +391,6 @@ static CGFloat CGInsertionY(UICollectionView *list) {
         });
         if (explore) {
             anchor=CGContentYOfView(explore,list,YES)+16;
-            source=@"explore_accessibility";
         }
     }
     // Fall back to collection-section header frames if the shortcut is
@@ -408,7 +405,6 @@ static CGFloat CGInsertionY(UICollectionView *list) {
         }
         if (best!=CGFLOAT_MAX) {
             anchor=best;
-            source=@"section_header";
         }
     }
     // UICollectionView may not render offscreen headers on the initial pass.
@@ -421,7 +417,6 @@ static CGFloat CGInsertionY(UICollectionView *list) {
                 [list.collectionViewLayout layoutAttributesForItemAtIndexPath:index];
             if (attr && CGRectGetMinY(attr.frame)>20) {
                 anchor=CGRectGetMinY(attr.frame)-32;
-                source=@"section_layout";
                 break;
             }
         }
