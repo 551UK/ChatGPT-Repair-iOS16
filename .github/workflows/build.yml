@@ -54,7 +54,12 @@ jobs:
           set -euo pipefail
           export THEOS="$HOME/theos"
           test "$(awk '/^Version:/ { print $2; exit }' control)" = "0.53.0"
-          make package FINALPACKAGE=1
+          set +e
+          make package FINALPACKAGE=1 > "$RUNNER_TEMP/chatgptrepair-build.log" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/chatgptrepair-build.log"
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
           shopt -s nullglob
           debs=(packages/*.deb)
           test "${#debs[@]}" -eq 1
@@ -94,6 +99,30 @@ jobs:
                       print(filename,'verified SHA256',hashlib.sha256(output).hexdigest())
               assert len(list((d/'merged'/target).glob('*.dylib')))==2, 'Unexpected dylib count'
           PY
+
+      - name: Record failure details for repair
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build-reports
+          {
+            echo "ChatGPTRepair v0.55 build failure"
+            echo "Commit: $GITHUB_SHA"
+            echo "Run: $GITHUB_RUN_ID"
+            echo "Date (UTC): $(date -u)"
+            echo "--- Compiler output (last 150 lines) ---"
+            if [ -f "$RUNNER_TEMP/chatgptrepair-build.log" ]; then
+              tail -n 150 "$RUNNER_TEMP/chatgptrepair-build.log"
+            else
+              echo "Compilation was never reached; check preceding workflow steps."
+            fi
+          } > .build-reports/v55-failure.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .build-reports/v55-failure.txt
+          git commit -m "CI failure evidence for v0.55 (temporary)" || exit 0
+          git push origin HEAD:main
 
       - name: Save single installation DEB as build artifact
         uses: actions/upload-artifact@v4
