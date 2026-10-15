@@ -87,7 +87,7 @@ jobs:
           deb='dist/ChatGPTRepair_0.55.1_iphoneos-arm64.deb'
           contents=subprocess.check_output(['dpkg-deb','-c',deb],text=True)
           paths=[line.split(' ./',1)[1].strip() for line in contents.splitlines() if ' ./' in line]
-          bad=[p for p in paths if p not in ('.','var/','var') and not p.startswith('var/')]
+          bad=[p for p in paths if p not in ('','var/','var') and not p.startswith('var/')]
           assert not bad, 'Read-only iOS system path in DEB: '+repr(bad)
           assert any('var/jb/usr/share/doc/chatgptrepair/' in p for p in paths), 'Missing rootless docs'
           print('Verified all',len(paths),'archive members remain under rootless /var/jb')
