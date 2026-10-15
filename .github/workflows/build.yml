@@ -60,6 +60,9 @@ jobs:
           test "${#debs[@]}" -eq 1
           test "$(dpkg-deb -f "${debs[0]}" Package)" = "com.551uk.chatgptrepair"
           test "$(dpkg-deb -f "${debs[0]}" Version)" = "0.53.0"
+          rootless_lib=\"$(mktemp -d)\"
+          dpkg-deb -x \"${debs[0]}\" \"$rootless_lib\"
+          nm -gU \"$rootless_lib/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib\" | grep -F '_CGRCompatibilityEnsureLoaded' >/dev/null
           mkdir -p build-input
           cp "${debs[0]}" build-input/v53.deb
 
@@ -70,16 +73,16 @@ jobs:
           python3 scripts/package_combined.py \
             --repair build-input/v53.deb \
             --compat vendor/compatibility-2.3.5.deb \
-            --version 0.54.1 \
-            --out dist/ChatGPTRepair_0.54.1_iphoneos-arm64.deb
-          test "$(dpkg-deb -f dist/ChatGPTRepair_0.54.1_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
-          test "$(dpkg-deb -f dist/ChatGPTRepair_0.54.1_iphoneos-arm64.deb Version)" = "0.54.1"
+            --version 0.55.0 \
+            --out dist/ChatGPTRepair_0.55.0_iphoneos-arm64.deb
+          test "$(dpkg-deb -f dist/ChatGPTRepair_0.55.0_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
+          test "$(dpkg-deb -f dist/ChatGPTRepair_0.55.0_iphoneos-arm64.deb Version)" = "0.55.0"
           python3 - <<'PY'
           import hashlib, pathlib, subprocess, tempfile
           target='var/jb/Library/MobileSubstrate/DynamicLibraries'
           with tempfile.TemporaryDirectory() as d:
               d=pathlib.Path(d)
-              for name,deb in [('repair','build-input/v53.deb'),('compat','vendor/compatibility-2.3.5.deb'),('merged','dist/ChatGPTRepair_0.54.1_iphoneos-arm64.deb')]:
+              for name,deb in [('repair','build-input/v53.deb'),('compat','vendor/compatibility-2.3.5.deb'),('merged','dist/ChatGPTRepair_0.55.0_iphoneos-arm64.deb')]:
                   out=d/name
                   subprocess.run(['dpkg-deb','-x',deb,str(out)],check=True)
               for stem,orig in [('ChatGPTRepair','repair'),('ChatGBeFree','compat')]:
@@ -95,8 +98,8 @@ jobs:
       - name: Save single installation DEB as build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ChatGPTRepair-0.54.1-single-DEB
-          path: dist/ChatGPTRepair_0.54.1_iphoneos-arm64.deb
+          name: ChatGPTRepair-0.55.0-single-DEB
+          path: dist/ChatGPTRepair_0.55.0_iphoneos-arm64.deb
           if-no-files-found: error
 
       - name: Publish single-package release (keep v53 recovery until verified)
@@ -106,10 +109,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="v0.54.1"
-          artifact="dist/ChatGPTRepair_0.54.1_iphoneos-arm64.deb"
+          tag="v0.55.0"
+          artifact="dist/ChatGPTRepair_0.55.0_iphoneos-arm64.deb"
           cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
-          # ChatGPTRepair 0.54.1
+          # ChatGPTRepair 0.55.0
 
           Single installable rootless Dopamine package for the legacy ChatGPT iOS 16 application.
 
@@ -117,11 +120,11 @@ jobs:
           - Bundles the exact separately preserved 2.3.5 compatibility, voice, model, image, and copy component as a precompiled dylib.
           - Includes both original dylibs and injection plists without byte changes. Sileo shows one ChatGPTRepair package.
           - Replaces the separately installed com.liam.chatgbefree package.
-          - v0.54.1 TEST: CompatibilityBootstrap.m preloads the bundled 2.3.5 dylib before the v53 history constructor and writes a temporary diagnostic log at Library/Caches/ChatGPTRepair-CompatProbe.log.\n          - The temporary compatibility log MUST BE REMOVED in the final release; see FINAL_RELEASE_CHECKLIST.md.\n          - Force-close the ChatGPT app and respring after installing.\n          - This is a combined build, NOT a fully editable source rewrite of the precompiled 2.3.5 component. Third-party ownership and GPL obligations remain.
+          - v0.55.0 TEST: CompatibilityBootstrap.m preloads the bundled 2.3.5 dylib before the v53 history constructor and writes a temporary diagnostic log at Library/Caches/ChatGPTRepair-CompatProbe.log.\n          - The temporary compatibility log MUST BE REMOVED in the final release; see FINAL_RELEASE_CHECKLIST.md.\n          - Force-close the ChatGPT app and respring after installing.\n          - This is a combined build, NOT a fully editable source rewrite of the precompiled 2.3.5 component. Third-party ownership and GPL obligations remain.
           - On-device feature parity and compatibility startup must be tested before removing working recovery releases.
           NOTES
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "ChatGPTRepair v0.54.1 — One DEB" --notes-file "$RUNNER_TEMP/notes.md"
+            gh release create "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "ChatGPTRepair v0.55.0 — One DEB" --notes-file "$RUNNER_TEMP/notes.md"
           fi
