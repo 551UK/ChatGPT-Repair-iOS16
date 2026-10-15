@@ -65,9 +65,9 @@ jobs:
           test "${#debs[@]}" -eq 1
           test "$(dpkg-deb -f "${debs[0]}" Package)" = "com.551uk.chatgptrepair"
           test "$(dpkg-deb -f "${debs[0]}" Version)" = "0.53.0"
-          rootless_lib=\"$(mktemp -d)\"
-          dpkg-deb -x \"${debs[0]}\" \"$rootless_lib\"
-          nm -gU \"$rootless_lib/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib\" | grep -F '_CGRCompatibilityEnsureLoaded' >/dev/null
+          rootless_lib="$(mktemp -d)"
+          dpkg-deb -x "${debs[0]}" "$rootless_lib"
+          nm -gU "$rootless_lib/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib" | grep -F '_CGRCompatibilityEnsureLoaded' >/dev/null
           mkdir -p build-input
           cp "${debs[0]}" build-input/v53.deb
 
