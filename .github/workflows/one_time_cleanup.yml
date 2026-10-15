@@ -1,0 +1,69 @@
+name: Finalize ChatGPTRepair repository cleanup
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/one_time_cleanup.yml'
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm tested backup replacement exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view v0.55.2 --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[].name' | grep -Fxq 'ChatGPTRepair_0.55.2_iphoneos-arm64.deb'
+          test -f src/HistoryIsolation.m
+          test -f src/HistoryPageCache.m
+          test -f src/PinnedSidebarIntegration.m
+          test -f src/CompatibilityBoot.m
+          test -f vendor/compatibility-2.3.5.deb.b64
+          test -f scripts/package_combined.py
+          python3 tests/check_clean_release.py
+      - name: Delete obsolete development branches and releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -t branches < <(gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name')
+          for branch in "${branches[@]}"; do
+            if [ "$branch" = "main" ]; then continue; fi
+            echo "Removing branch: $branch"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch" >/dev/null
+          done
+          mapfile -t releases < <(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName')
+          for tag in "${releases[@]}"; do
+            if [ "$tag" = "v0.55.2" ]; then continue; fi
+            echo "Removing old release and tag: $tag"
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          done
+          mapfile -t tagrefs < <(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags" --jq '.[].ref')
+          for ref in "${tagrefs[@]}"; do
+            if [ "$ref" = "refs/tags/v0.55.2" ]; then continue; fi
+            echo "Removing orphan tag: $ref"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/$ref" >/dev/null
+          done
+          mapfile -t remain < <(gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name')
+          if [ "${#remain[@]}" -ne 1 ] || [ "${remain[0]}" != "main" ]; then
+            printf 'Unexpected remaining branches: %s\n' "${remain[*]}"
+            exit 1
+          fi
+          mapfile -t releases_left < <(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName')
+          if [ "${#releases_left[@]}" -ne 1 ] || [ "${releases_left[0]}" != "v0.55.2" ]; then
+            printf 'Unexpected releases: %s\n' "${releases_left[*]}"
+            exit 1
+          fi
+          echo "Verified: only branch main and release v0.55.2 remain."
+      - name: Remove temporary cleanup workflow itself
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/one_time_cleanup.yml
+          git commit -m 'Finalize ChatGPTRepair cleanup: only main and v0.55.2 release'
+          git push origin HEAD:main
