@@ -1,6 +1,6 @@
 # ChatGPTRepair
 
-Restores missing features to the older ChatGPT app on jailbroken iOS 16.
+Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tweak is designed for version 1.2024.200.
 
 - Removes the sunset/update-required screen.
 - Restores working chat history and older conversations.
@@ -9,5 +9,3 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16.
 - Adds additional AI models and thinking options.
 - Restores voice chat features.
 - Improves copying text and compatibility with newer ChatGPT features.
-
-**Compatibility:** ChatGPT 1.2024.200 · iOS 16 · Dopamine rootless.
