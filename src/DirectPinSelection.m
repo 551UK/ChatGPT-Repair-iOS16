@@ -64,21 +64,21 @@ BOOL CG46OpenPin(UIViewController *controller,NSString *identifier,NSString *tit
  Ivar ivar=class_getInstanceVariable(cls,"viewModel");
  id model=ivar?object_getIvar(controller,ivar):nil;
  if(!b||!model||![NSStringFromClass(object_getClass(model)) containsString:@"HistoryViewModel"]) {
-  (void)0;return NO;
+  return NO;
  }
  // Field offset used by native HistorySelection dispatch at 0x36e710.
  uintptr_t closureOffset=*(const uintptr_t *)(b+0x2036b88);
- if(closureOffset!=760) {(void)0;return NO;}
+ if(closureOffset!=760) {return NO;}
  uintptr_t pair[2];memcpy(pair,(const uint8_t *)(__bridge void *)model+closureOffset,sizeof(pair));
  Dl_info info={0};
  if(!pair[0]||!dladdr((void *)pair[0],&info)||info.dli_fbase!=(const void *)b) {
-  (void)0;return NO;
+  return NO;
  }
  void *bridge=dlsym(RTLD_DEFAULT,"$sSS10FoundationE36_unconditionallyBridgeFromObjectiveCySSSo8NSStringCSgFZ");
  void (*enumTag)(void *,void *,unsigned)=dlsym(RTLD_DEFAULT,"swift_storeEnumTagMultiPayload");
  void *(*retain)(void *)=dlsym(RTLD_DEFAULT,"swift_retain");
  void (*release)(void *)=dlsym(RTLD_DEFAULT,"swift_release");
- if(!bridge||!enumTag||!retain||!release){(void)0;return NO;}
+ if(!bridge||!enumTag||!retain||!release){return NO;}
  void *cm=CG46Meta(b,0xd41c38),*hm=CG46Meta(b,0x3729bc);
  void *sm=CG46Meta(b,0x37fa34),*search=CG46Meta(b,0x37ec54);
  void *dm=CG46Meta(b,0x196238c); // imported Foundation.Date metadata thunk
@@ -86,7 +86,7 @@ BOOL CG46OpenPin(UIViewController *controller,NSString *identifier,NSString *tit
  CGWitness *cw=CG46Witness(cm),*hw=CG46Witness(hm),*sw=CG46Witness(sm);
  CGWitness *rw=CG46Witness(search),*dw=CG46Witness(dm);
  if(!CG46Bounds(cw)||!CG46Bounds(hw)||!CG46Bounds(sw)||!CG46Bounds(rw)||!CG46Bounds(dw)||!tuple) {
-  (void)0;return NO;
+  return NO;
  }
  size_t co=*(const uintptr_t *)((const uint8_t *)tuple+0x30);
  uint32_t hd=CG46Field(hm,4),hs=CG46Field(hm,5),cd=CG46Field(cm,3);
@@ -94,7 +94,7 @@ BOOL CG46OpenPin(UIViewController *controller,NSString *identifier,NSString *tit
     CG46Field(cm,0)!=0||CG46Field(cm,1)!=16||dw->size!=8||hd<50||
     hd+dw->size>hw->size||hs<hd+dw->size||hs+rw->size>hw->size||
     cd+dw->size>cw->size||co<hw->size||co+cw->size>sw->size) {
-  (void)0;return NO;
+  return NO;
  }
  uint8_t *selection=calloc(1,sw->stride),*conv=calloc(1,cw->stride);
  if(!selection||!conv){free(selection);free(conv);return NO;}
@@ -118,12 +118,12 @@ BOOL CG46OpenPin(UIViewController *controller,NSString *identifier,NSString *tit
  free(conv);
  enumTag(selection,sm,1); // HistorySelection.historyItem(item, conversation:)
  if(pair[1])retain((void *)pair[1]);
- (void)0;
+ 
  CG46ObservedPinID=[identifier copy];
  CG46Select((void *)pair[0],(void *)pair[1],selection);
  if(pair[1])release((void *)pair[1]);
  sw->destroy(selection,sm);
  free(selection);
- (void)0;
+ 
  return YES;
 }

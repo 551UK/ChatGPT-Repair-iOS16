@@ -119,7 +119,7 @@ static void CGFinishOlderRetry(CGOlderPageRetry *job) {
     NSError *error=job.lastError;
     NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
         ?((NSHTTPURLResponse *)response).statusCode:0;
-    (void)0;
+    
     for(id waiter in waiters) {
         void (^completion)(NSData *,NSURLResponse *,NSError *)=waiter;
         completion(data,response,error);
@@ -131,7 +131,7 @@ static void CGScheduleOlderRetry(CGOlderPageRetry *job) {
     NSTimeInterval delay=backoff[MIN(job.attempts,2)];
     NSTimeInterval after=CGRetryAfter(job.lastResponse);
     if(after>300) {
-        (void)0;
+        
         CGFinishOlderRetry(job);
         return;
     }
@@ -143,7 +143,7 @@ static void CGScheduleOlderRetry(CGOlderPageRetry *job) {
         delay=MAX(delay,sOldPageRetryGate-now);
         sOldPageRetryGate=now+delay+2;
     }
-    (void)0;
+    
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),
                    dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
         @synchronized([NSURLCache class]) {
@@ -162,7 +162,7 @@ static void CGScheduleOlderRetry(CGOlderPageRetry *job) {
                 [session finishTasksAndInvalidate];
                 NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
                     ?((NSHTTPURLResponse *)response).statusCode:0;
-                (void)0;
+                
                 // Reuse v52 validation/cache semantics. The marker blocks
                 // another retry from being spawned for the owned session.
                 CGHistoryPageResult(replay,configuration,data,response,error,
@@ -183,7 +183,7 @@ static void CGScheduleOlderRetry(CGOlderPageRetry *job) {
             if(session)[session invalidateAndCancel];
             job.lastError=[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCannotConnectToHost
                 userInfo:@{NSLocalizedDescriptionKey:@"History retry session could not start"}];
-            (void)0;
+            
             CGFinishOlderRetry(job);
         }
     });
@@ -209,7 +209,7 @@ static BOOL CGEnqueueOlderRetry(NSString *key, NSURLRequest *request,
         [job.waiters addObject:[completion copy]];
     }
     if(first)CGScheduleOlderRetry(job);
-    else (void)0;
+    
     return YES;
 }
 
@@ -243,7 +243,7 @@ void CGHistoryPageResult(NSURLRequest *request,NSURLSessionConfiguration *config
                 }
                 BOOL saved=[@{@"saved":@(NSDate.date.timeIntervalSince1970),@"data":data} writeToFile:path atomically:YES];
                 if(saved)[fm setAttributes:@{NSFileProtectionKey:NSFileProtectionCompleteUntilFirstUserAuthentication} ofItemAtPath:path error:NULL];
-                (void)0;
+                
             } else if(status==429 && age>=0 && age<=kMaxAge &&
                       [cached isKindOfClass:NSData.class] && CGValidPage(cached)) {
                 fallback=cached;
@@ -251,7 +251,7 @@ void CGHistoryPageResult(NSURLRequest *request,NSURLSessionConfiguration *config
         }
     }
     if(fallback) {
-        (void)0;
+        
         NSHTTPURLResponse *cachedResponse=[[NSHTTPURLResponse alloc] initWithURL:request.URL
             statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{
                 @"Content-Type":@"application/json",@"Content-Length":[NSString stringWithFormat:@"%lu",(unsigned long)fallback.length],
@@ -260,7 +260,7 @@ void CGHistoryPageResult(NSURLRequest *request,NSURLSessionConfiguration *config
     } else {
         if(status==429 && CGEnqueueOlderRetry(key,request,configuration,data,response,error,completion))
             return;
-        if(status==429)(void)0;
+        
         completion(data,response,error);
     }
 }

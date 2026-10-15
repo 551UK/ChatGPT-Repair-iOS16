@@ -81,7 +81,6 @@ static NSURLRequest *CGRAdaptHistoryRequest(NSURLRequest *request) {
     if (!url || [url isEqual:request.URL]) return request;
     NSMutableURLRequest *adapted = [request mutableCopy];
     adapted.URL = url; // Retains method, headers, cookies policy, timeout and body.
-    (void)0;
     return adapted;
 }
 
@@ -142,14 +141,14 @@ static void CGRInstallBrowserListAdapter(void) {
     CGRSwizzleSessionMethod(
         @selector(dataTaskWithURL:completionHandler:),
         @selector(cgr_browserDataTaskWithURL:completionHandler:));
-    (void)0;
+    
 }
 
 __attribute__((constructor)) static void CGRStart(void) {
     @autoreleasepool {
         if (![[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.openai.chat"]) return;
         CGRCompatibilityEnsureLoaded();
-        (void)0;
+        
         CGRInstallBrowserListAdapter();
     }
 }
