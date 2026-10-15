@@ -1,21 +1,23 @@
-name: Build ChatGPT Repair Rootless
+name: Build ChatGPTRepair single rootless DEB
 
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'work/v046-direct-native-selection']
+    branches: [main]
     paths:
       - 'src/**'
       - 'Makefile'
       - 'control'
       - 'ChatGPTRepair.plist'
+      - 'scripts/package_combined.py'
+      - 'vendor/**'
       - '.github/workflows/build.yml'
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  combined-package:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -28,37 +30,98 @@ jobs:
           mkdir -p "$HOME/theos/sdks"
           curl -fL --retry 3 -o "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" "https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz"
           tar -xJf "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" -C "$HOME/theos/sdks"
-      - name: Build rootless package
+
+      - name: Restore and verify exact compatibility component
         shell: bash
         run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, pathlib
+          encoded = pathlib.Path('vendor/compatibility-2.3.5.deb.b64').read_text()
+          raw = base64.b64decode(''.join(encoded.split()), validate=True)
+          actual = hashlib.sha256(raw).hexdigest()
+          expected = '35a7b8724e36fbe9ccef9b4a2186d18eced6af6ebbeeb3bdb98b6f4e51b5e419'
+          if actual != expected:
+              raise SystemExit('Compatibility binary SHA256 mismatch: ' + actual)
+          pathlib.Path('vendor/compatibility-2.3.5.deb').write_bytes(raw)
+          print('Verified compatibility binary: %d bytes; SHA256 %s' % (len(raw), actual))
+          PY
+          test "$(dpkg-deb -f vendor/compatibility-2.3.5.deb Version)" = "2.3.5"
+
+      - name: Compile preserved v53 source from main
+        shell: bash
+        run: |
+          set -euo pipefail
           export THEOS="$HOME/theos"
+          test "$(awk '/^Version:/ { print $2; exit }' control)" = "0.53.0"
           make package FINALPACKAGE=1
-      - name: Save DEB as workflow artifact
+          shopt -s nullglob
+          debs=(packages/*.deb)
+          test "${#debs[@]}" -eq 1
+          test "$(dpkg-deb -f "${debs[0]}" Package)" = "com.551uk.chatgptrepair"
+          test "$(dpkg-deb -f "${debs[0]}" Version)" = "0.53.0"
+          mkdir -p build-input
+          cp "${debs[0]}" build-input/v53.deb
+
+      - name: Combine into one ChatGPTRepair rootless installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/package_combined.py \
+            --repair build-input/v53.deb \
+            --compat vendor/compatibility-2.3.5.deb \
+            --version 0.54.0 \
+            --out dist/ChatGPTRepair_0.54.0_iphoneos-arm64.deb
+          test "$(dpkg-deb -f dist/ChatGPTRepair_0.54.0_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
+          test "$(dpkg-deb -f dist/ChatGPTRepair_0.54.0_iphoneos-arm64.deb Version)" = "0.54.0"
+          python3 - <<'PY'
+          import hashlib, pathlib, subprocess, tempfile
+          target='var/jb/Library/MobileSubstrate/DynamicLibraries'
+          with tempfile.TemporaryDirectory() as d:
+              d=pathlib.Path(d)
+              for name,deb in [('repair','build-input/v53.deb'),('compat','vendor/compatibility-2.3.5.deb'),('merged','dist/ChatGPTRepair_0.54.0_iphoneos-arm64.deb')]:
+                  out=d/name
+                  subprocess.run(['dpkg-deb','-x',deb,str(out)],check=True)
+              for stem,orig in [('ChatGPTRepair','repair'),('ChatGBeFree','compat')]:
+                  for ext in ('dylib','plist'):
+                      filename=stem+'.'+ext
+                      source=(d/orig/target/filename).read_bytes()
+                      output=(d/'merged'/target/filename).read_bytes()
+                      assert source==output, filename+' differs in combined DEB'
+                      print(filename,'verified SHA256',hashlib.sha256(output).hexdigest())
+              assert len(list((d/'merged'/target).glob('*.dylib')))==2, 'Unexpected dylib count'
+          PY
+
+      - name: Save single installation DEB as build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ChatGPT-Repair-iOS16-rootless
-          path: packages/*.deb
+          name: ChatGPTRepair-0.54.0-single-DEB
+          path: dist/ChatGPTRepair_0.54.0_iphoneos-arm64.deb
           if-no-files-found: error
-      - name: Publish v0.53.0 installable DEB
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+      - name: Publish single-package release (keep v53 recovery until verified)
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          version="$(awk '/^Version:/ {print $2;exit}' control)"
-          test -n "$version"
-          tag="v$version"
-          shopt -s nullglob
-          debs=(packages/*.deb)
-          test "${#debs[@]}" -eq 1
-          mkdir -p release
-          output="release/ChatGPT-Repair-iOS16_${version}_iphoneos-arm64.deb"
-          cp "${debs[0]}" "$output"
+          tag="v0.54.0"
+          artifact="dist/ChatGPTRepair_0.54.0_iphoneos-arm64.deb"
+          cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
+          # ChatGPTRepair 0.54.0
+
+          Single installable rootless Dopamine package for the legacy ChatGPT iOS 16 application.
+
+          - Compiles the preserved v0.53.0 history, pagination, pinned-chat and pin/unpin repair from source in main.
+          - Bundles the exact separately preserved 2.3.5 compatibility, voice, model, image, and copy component as a precompiled dylib.
+          - Includes both original dylibs and injection plists without byte changes. Sileo shows one ChatGPTRepair package.
+          - Replaces the separately installed com.liam.chatgbefree package.
+          - This is a combined build, NOT a fully editable source rewrite of the precompiled 2.3.5 component. Third-party ownership and GPL obligations remain.
+          - On-device feature parity should be tested before removing working recovery releases.
+          NOTES
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$tag" "$output" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$tag" "$output" --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" --title "ChatGPT Repair iOS16 $tag (551UK)" \
-              --notes 'Based on preserved v0.52.0: retries failed older-history pages at offset 20, 40 etc with bounded rate-limit backoff. Keeps v52 pin/unpin, pinned section, chat navigation and history cache. Experimental; install with Dopamine rootless on iOS 16. This does not fix phone-created conversations missing from the browser.'
+            gh release create "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "ChatGPTRepair v0.54.0 — One DEB" --notes-file "$RUNNER_TEMP/notes.md"
           fi
