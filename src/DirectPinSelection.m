@@ -11,7 +11,6 @@
 #import <string.h>
 #import <stdint.h>
 
-extern NSString *CG46ObservedPinID;
 extern void CG46BridgeString(void *, NSString *, void *);
 extern void CG46MakeConversation(void *, void *, void *, void *);
 extern void CG46SetString(void *, void *, void *);
@@ -119,7 +118,6 @@ BOOL CG46OpenPin(UIViewController *controller,NSString *identifier,NSString *tit
  enumTag(selection,sm,1); // HistorySelection.historyItem(item, conversation:)
  if(pair[1])retain((void *)pair[1]);
  
- CG46ObservedPinID=[identifier copy];
  CG46Select((void *)pair[0],(void *)pair[1],selection);
  if(pair[1])release((void *)pair[1]);
  sw->destroy(selection,sm);

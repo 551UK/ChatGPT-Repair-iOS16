@@ -31,7 +31,6 @@ static IMP sOriginalLayout = NULL;
 static IMP sOriginalAppear = NULL;
 static IMP sOriginalScroll = NULL;
 static char kPinView, kPinAnchor, kRenderedPinSet;
-NSString *CG46ObservedPinID;
 static NSString * const kUpdated = @"com.551uk.pins.updated";
 
 
@@ -245,18 +244,7 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
 }
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request
               completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completion {
-    NSString *observed=CG46ObservedPinID;
-    BOOL detail=observed.length && [request.URL.path isEqualToString:[@"/backend-api/conversation/" stringByAppendingString:observed]];
-    BOOL init=observed.length && [request.URL.path isEqualToString:@"/backend-api/conversation/init"];
     void (^forward)(NSData *,NSURLResponse *,NSError *)=completion;
-    if(completion && (detail||init)) {
-        
-        forward=^(NSData *data,NSURLResponse *response,NSError *error) {
-            NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;
-            
-            completion(data,response,error);
-        };
-    }
     if (completion && self!=sMenuSession && CGIsHistory(request) &&
         ![[request valueForHTTPHeaderField:@"X-551UK-History-Retry"] isEqualToString:@"1"]) {
         void (^originalForward)(NSData *,NSURLResponse *,NSError *)=forward;
