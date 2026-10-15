@@ -6,7 +6,7 @@ It is a repackaging procedure, not a source-code restoration of opaque binaries.
 
 Usage:
  python3 scripts/package_combined.py --repair path/to/v53.deb \\
-    --compat path/to/ChatGBeFree-2.3.5.deb --out ChatGPTRepair_0.55.1_iphoneos-arm64.deb
+    --compat path/to/ChatGBeFree-2.3.5.deb --out ChatGPTRepair_0.55.2_iphoneos-arm64.deb
 """
 from __future__ import annotations
 import argparse, hashlib, pathlib, shutil, subprocess, tempfile, plistlib
@@ -24,7 +24,7 @@ def main():
     ap.add_argument('--repair', required=True, type=pathlib.Path)
     ap.add_argument('--compat', required=True, type=pathlib.Path)
     ap.add_argument('--out', required=True, type=pathlib.Path)
-    ap.add_argument('--version', default='0.55.1')
+    ap.add_argument('--version', default='0.55.2')
     ap.add_argument('--allow-v52-for-selftest', action='store_true', help='For static test packages only; never ship as v53')
     args = ap.parse_args()
     rv=dpkg_read(args.repair,'Version')
@@ -38,7 +38,7 @@ def main():
     for deb in (args.repair,args.compat):
         if dpkg_read(deb,'Architecture')!='iphoneos-arm64':
             ap.error('Expected rootless iphoneos-arm64 package')
-    if args.allow_v52_for_selftest and rv!='0.53.0' and args.version=='0.55.1':
+    if args.allow_v52_for_selftest and rv!='0.53.0' and args.version=='0.55.2':
         ap.error('Self-test packages MUST use an explicit -test version')
     with tempfile.TemporaryDirectory() as td:
         tmp=pathlib.Path(td); repair=tmp/'repair'; compat=tmp/'compat'; result=tmp/'merged';meta=tmp/'control'

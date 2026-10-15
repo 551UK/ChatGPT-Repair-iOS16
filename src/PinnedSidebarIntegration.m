@@ -34,23 +34,7 @@ static char kPinView, kPinAnchor, kRenderedPinSet;
 NSString *CG46ObservedPinID;
 static NSString * const kUpdated = @"com.551uk.pins.updated";
 
-static void CGPLog(NSString *line) {
-    NSString *file = [NSHomeDirectory() stringByAppendingPathComponent:
-                       @"Library/Caches/ChatGPT551Repair.log"];
-    NSString *value = [NSString stringWithFormat:@"%@ pins %@\n",[NSDate date],line];
-    @synchronized ([CGPinnedSectionStore class]) {
-        NSFileManager *fm = NSFileManager.defaultManager;
-        if ([[fm attributesOfItemAtPath:file error:NULL] fileSize] > 524288)
-            [fm removeItemAtPath:file error:NULL];
-        if (![fm fileExistsAtPath:file]) [fm createFileAtPath:file contents:nil attributes:nil];
-        NSFileHandle *h = [NSFileHandle fileHandleForWritingAtPath:file];
-        @try {
-            [h seekToEndOfFile];
-            [h writeData:[value dataUsingEncoding:NSUTF8StringEncoding]];
-        } @catch (__unused NSException *exception) {}
-        [h closeFile];
-    }
-}
+
 // v0.49: Pin mutation uses the native 2026 route: pins/conversation/<UUID>.
 static NSMutableSet *sPinWrites;
 static NSMutableDictionary<NSString *, NSString *> *sHistoryTitles;
@@ -75,7 +59,7 @@ static void CGSetPin(UIViewController *owner, NSString *cid, NSString *title, BO
     NSURLSession *session=sMenuSession;
     NSMutableURLRequest *request=[CGPinsRequestFromHistoryRequest(sHistoryRequest) mutableCopy];
     if (sRefreshing) { CGPinError(owner,@"The pinned list is refreshing. Please try again in a moment."); return; }
-    if (!session || !request) { CGPLog(@"v0.50 mutation_missing_auth_context=1"); CGPinError(owner,@"Load the chat list once so the account authentication can be captured."); return; }
+    if (!session || !request) { (void)0; CGPinError(owner,@"Load the chat list once so the account authentication can be captured."); return; }
     NSURLComponents *url=[NSURLComponents componentsWithURL:request.URL resolvingAgainstBaseURL:NO];
     url.path=[@"/backend-api/pins/conversation/" stringByAppendingString:cid];
     url.query=nil; request.URL=url.URL; request.HTTPMethod=pin?@"POST":@"DELETE";
@@ -90,7 +74,7 @@ static void CGSetPin(UIViewController *owner, NSString *cid, NSString *title, BO
             NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;
             dispatch_async(dispatch_get_main_queue(), ^{
                 [sPinWrites removeObject:cid];
-                CGPLog([NSString stringWithFormat:@"v0.51 pin_write action=%@ http=%ld error=%ld",pin?@"pin":@"unpin",(long)status,(long)error.code]);
+                (void)0;
                 if (store!=sPins || ![(auth?:@"") isEqualToString:([sHistoryRequest valueForHTTPHeaderField:@"Authorization"]?:@"")]) return;
                 if (error || status<200 || status>=300) {
                     CGPinError(weakOwner, error?@"The request could not be completed. Your pinned list has not been changed.":[NSString stringWithFormat:@"The server rejected the update (HTTP %ld). Your pinned list has not been changed.",(long)status]); return;
@@ -135,7 +119,7 @@ static void CGRememberHistory(NSData *data) {
         id cid=row[@"id"], title=row[@"title"];
         if ([cid isKindOfClass:NSString.class] && [title isKindOfClass:NSString.class] && [[NSUUID alloc] initWithUUIDString:cid]) records[cid]=title;
     }
-    dispatch_async(dispatch_get_main_queue(), ^{ [sHistoryTitles addEntriesFromDictionary:records]; CGPLog([NSString stringWithFormat:@"v0.50 titles_loaded=%lu",(unsigned long)sHistoryTitles.count]); });
+    dispatch_async(dispatch_get_main_queue(), ^{ [sHistoryTitles addEntriesFromDictionary:records]; (void)0; });
 }
 // Wrap the app's existing menu factory only while its history delegate builds
 // that row's menu. Keep its original preview provider and every native action.
@@ -152,12 +136,12 @@ static void CGRememberHistory(NSData *data) {
     if ([(id)identifier isKindOfClass:NSString.class]) cid=(id)identifier;
     else if ([(id)identifier isKindOfClass:NSUUID.class]) cid=[(NSUUID *)(id)identifier UUIDString];
     if (!cid.length || ![[NSUUID alloc] initWithUUIDString:cid]) {
-        CGPLog([NSString stringWithFormat:@"v0.51 native_menu_identifier_rejected class=%@",NSStringFromClass([(id)identifier class])]);
+        (void)0;
         return [self cgp_configurationWithIdentifier:identifier previewProvider:preview actionProvider:provider];
     }
     NSString *title=sHistoryTitles[cid]?:@"Untitled conversation";
     __weak UIViewController *owner=sMenuOwner;
-    CGPLog(@"v0.51 native_menu_identifier_valid=1 pin_action_added=1");
+    (void)0;
     return [self cgp_configurationWithIdentifier:identifier previewProvider:preview actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggested) {
         UIMenu *original=provider?provider(suggested):nil;
         NSMutableArray *children=[NSMutableArray arrayWithArray:original.children?:@[]];
@@ -204,7 +188,7 @@ static void CGRefreshPins(void) {
     NSTimeInterval now = NSDate.date.timeIntervalSince1970;
     if (sRefreshing || sPinWrites.count || now - sLastRefresh < 12) return;
     sRefreshing = YES; sLastRefresh = now;
-    CGPLog(@"fetch start");
+    (void)0;
     [sPins refreshWithSession:session authenticatedHistoryRequest:request
                   completion:^(BOOL accepted, NSError *error) {
         sRefreshing = NO;
@@ -213,11 +197,9 @@ static void CGRefreshPins(void) {
             // Do not clear the pin store or discard a newer captured session.
             sSession = nil;
             sLastRefresh = 0;
-            CGPLog(@"v0.48 invalidated_session_discarded=1 cached_pins_preserved=1");
+            (void)0;
         }
-        CGPLog([NSString stringWithFormat:@"fetch finish accepted=%d count=%lu error=%ld",
-            (int)accepted, (unsigned long)sPins.currentPins.count,
-            (long)(error ? error.code : 0)]);
+        (void)0;
         if (accepted) [[NSNotificationCenter defaultCenter]
             postNotificationName:kUpdated object:nil];
     }];
@@ -244,7 +226,7 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
             NSURLSessionConfiguration *config=[session.configuration copy];
             config.timeoutIntervalForRequest=30;
             sMenuSession=[NSURLSession sessionWithConfiguration:config];
-            CGPLog(@"v0.50 owned_pin_session_created=1");
+            (void)0;
         }
         CGRefreshPins();
     });
@@ -268,10 +250,10 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
     BOOL init=observed.length && [request.URL.path isEqualToString:@"/backend-api/conversation/init"];
     void (^forward)(NSData *,NSURLResponse *,NSError *)=completion;
     if(completion && (detail||init)) {
-        CGPLog(detail?@"v0.47 native_detail_requested=1":@"v0.47 native_init_requested=1");
+        (void)0;
         forward=^(NSData *data,NSURLResponse *response,NSError *error) {
             NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;
-            CGPLog([NSString stringWithFormat:@"v0.47 native_route=%@ http=%ld error=%ld bytes=%lu",detail?@"detail":@"init",(long)status,(long)error.code,(unsigned long)data.length]);
+            (void)0;
             completion(data,response,error);
         };
     }
@@ -460,8 +442,7 @@ static CGFloat CGInsertionY(UICollectionView *list) {
     // sits inside the GPT shortcuts rather than below Explore GPTs.
     // Do not cache or show a pinned panel at an unverified position.
     if (isfinite(anchor) && anchor<90) {
-        CGPLog([NSString stringWithFormat:
-            @"pinned_anchor_rejected=1 source=%@ y=%.1f",source,anchor]);
+        (void)0;
         anchor=NAN;
     }
     if (!isfinite(anchor) || anchor<=0) {
@@ -469,20 +450,13 @@ static CGFloat CGInsertionY(UICollectionView *list) {
         NSTimeInterval now=NSDate.date.timeIntervalSince1970;
         if (now-lastFailure>5) {
             lastFailure=now;
-            CGPLog([NSString stringWithFormat:
-                 @"anchor_unavailable sections=%ld visible_items=%lu visible_headers=%lu",
-                 (long)[list numberOfSections],
-                 (unsigned long)list.indexPathsForVisibleItems.count,
-                 (unsigned long)[list visibleSupplementaryViewsOfKind:
-                                    UICollectionElementKindSectionHeader].count]);
+            (void)0;
         }
         return NAN;
     }
     objc_setAssociatedObject(list,&kPinAnchor,@(anchor),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    CGPLog([NSString stringWithFormat:
-        @"native_pinned_anchor_found=1 source=%@ y=%.1f",
-        source,anchor]);
+    (void)0;
     return anchor;
 }
 static void CGRender(id controller) {
@@ -503,9 +477,9 @@ static void CGRender(id controller) {
         pinned.selectionHandler=^(CGPinnedSectionEntry *entry) {
             UIViewController *owner=weakVC;
             if (!owner || !entry.pin.conversationID.length) return;
-            CGPLog(@"v0.47 pinned_tap=1 route=direct_native_selection");
+            (void)0;
             BOOL opened=CG46OpenPin(owner,entry.pin.conversationID,entry.pin.title);
-            CGPLog([NSString stringWithFormat:@"v0.47 native_callback_dispatched=%d",opened]);
+            (void)0;
         };
         pinned.menuHandler=^UIMenu *(CGPinnedSectionEntry *entry) {
             return [UIMenu menuWithTitle:@"" children:@[CGPinAction(weakVC,entry.pin.conversationID,entry.pin.title)]];
@@ -514,7 +488,7 @@ static void CGRender(id controller) {
             UIViewController *owner=weakVC;
             if (owner) CGRender(owner);
         };
-        CGPLog(@"native_pinned_view_attached=1");
+        (void)0;
     }
     NSArray *pins=sPins.currentPins;
     if (objc_getAssociatedObject(list,&kRenderedPinSet)!=pins) {
@@ -538,7 +512,7 @@ static void CGRender(id controller) {
         static NSTimeInterval lastFailed=0;
         NSTimeInterval now=NSDate.date.timeIntervalSince1970;
         if (now-lastFailed>8) {
-            CGPLog(@"native_pinned_layout_spacer_unavailable=1");
+            (void)0;
             lastFailed=now;
         }
         height=0; // no overlay if we cannot reserve genuine layout space
@@ -563,10 +537,10 @@ static void CGHistoryAppear(id self, SEL command, BOOL animated) {
 static void CGInstallNativeHook(void) {
     if (sNativeHookInstalled) return;
     Class cls = objc_getClass("_TtC14ChatGPTHistory21HistoryViewController");
-    if (!cls) { CGPLog(@"native_history_class_missing"); return; }
+    if (!cls) { (void)0; return; }
     Method layout = class_getInstanceMethod(cls,@selector(viewDidLayoutSubviews));
     Method appear = class_getInstanceMethod(cls,@selector(viewDidAppear:));
-    if (!layout || !appear) { CGPLog(@"native_lifecycle_missing"); return; }
+    if (!layout || !appear) { (void)0; return; }
     Method scroll=class_getInstanceMethod(cls,@selector(scrollViewDidScroll:));
     if (scroll) {
         sOriginalScroll=method_getImplementation(scroll);
@@ -585,9 +559,9 @@ static void CGInstallNativeHook(void) {
     if(m) { sNativeMenuOne=method_getImplementation(m); class_replaceMethod(cls,one,(IMP)CGNativeMenuOne,method_getTypeEncoding(m)); }
     m=class_getInstanceMethod(cls,many);
     if(m) { sNativeMenuMany=method_getImplementation(m); class_replaceMethod(cls,many,(IMP)CGNativeMenuMany,method_getTypeEncoding(m)); }
-    CGPLog([NSString stringWithFormat:@"v0.51 menu_hooks one=%d many=%d",sNativeMenuOne!=NULL,sNativeMenuMany!=NULL]);
+    (void)0;
     sNativeHookInstalled = YES;
-    CGPLog(@"v0.47 fresh_v09 pinned_ui_hooks=1 normal_selection_untouched=1 route=direct_native_selection");
+    (void)0;
 }
 static void CGPinsDidChange(NSNotification *notification) {
     (void)notification;
@@ -633,6 +607,6 @@ __attribute__((constructor)) static void CGPinnedBoot(void) {
                     object:nil queue:NSOperationQueue.mainQueue usingBlock:
                     ^(NSNotification *note) { CGPinsDidChange(note); }];
         });
-        CGPLog(@"v0.53 loaded=1 history_next_20_bounded_429_retry=1 normal_menu_identity=native v52_pin_behaviour_preserved=1");
+        (void)0;
     }
 }

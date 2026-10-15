@@ -33,16 +33,7 @@ typedef struct {
  uint32_t flags, extraInhabitants;
 } CGWitness;
 
-static void CG46Log(NSString *s) {
- NSString *p=[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Caches/ChatGPT551Repair.log"];
- @synchronized(NSFileHandle.class) {
-  if(![NSFileManager.defaultManager fileExistsAtPath:p])
-   [NSFileManager.defaultManager createFileAtPath:p contents:nil attributes:nil];
-  NSFileHandle *f=[NSFileHandle fileHandleForWritingAtPath:p];
-  @try { [f seekToEndOfFile];[f writeData:[[NSString stringWithFormat:@"%@ direct_pin46 %@\n",NSDate.date,s] dataUsingEncoding:NSUTF8StringEncoding]]; }
-  @catch(__unused NSException *e) {} [f closeFile];
- }
-}
+
 static const uint8_t *CG46Image(void) {
  static const uint8_t expected[16]={0xf1,0xcf,0x3b,0x21,0xaa,0xaf,0x3e,0x57,0xbb,0x62,0xce,0x61,0x49,0xaa,0x90,0x40};
  for(uint32_t i=0;i<_dyld_image_count();i++) {
@@ -73,21 +64,21 @@ BOOL CG46OpenPin(UIViewController *controller,NSString *identifier,NSString *tit
  Ivar ivar=class_getInstanceVariable(cls,"viewModel");
  id model=ivar?object_getIvar(controller,ivar):nil;
  if(!b||!model||![NSStringFromClass(object_getClass(model)) containsString:@"HistoryViewModel"]) {
-  CG46Log(@"rejected=image_or_view_model");return NO;
+  (void)0;return NO;
  }
  // Field offset used by native HistorySelection dispatch at 0x36e710.
  uintptr_t closureOffset=*(const uintptr_t *)(b+0x2036b88);
- if(closureOffset!=760) {CG46Log(@"rejected=closure_offset");return NO;}
+ if(closureOffset!=760) {(void)0;return NO;}
  uintptr_t pair[2];memcpy(pair,(const uint8_t *)(__bridge void *)model+closureOffset,sizeof(pair));
  Dl_info info={0};
  if(!pair[0]||!dladdr((void *)pair[0],&info)||info.dli_fbase!=(const void *)b) {
-  CG46Log(@"rejected=callback_image");return NO;
+  (void)0;return NO;
  }
  void *bridge=dlsym(RTLD_DEFAULT,"$sSS10FoundationE36_unconditionallyBridgeFromObjectiveCySSSo8NSStringCSgFZ");
  void (*enumTag)(void *,void *,unsigned)=dlsym(RTLD_DEFAULT,"swift_storeEnumTagMultiPayload");
  void *(*retain)(void *)=dlsym(RTLD_DEFAULT,"swift_retain");
  void (*release)(void *)=dlsym(RTLD_DEFAULT,"swift_release");
- if(!bridge||!enumTag||!retain||!release){CG46Log(@"rejected=runtime_symbols");return NO;}
+ if(!bridge||!enumTag||!retain||!release){(void)0;return NO;}
  void *cm=CG46Meta(b,0xd41c38),*hm=CG46Meta(b,0x3729bc);
  void *sm=CG46Meta(b,0x37fa34),*search=CG46Meta(b,0x37ec54);
  void *dm=CG46Meta(b,0x196238c); // imported Foundation.Date metadata thunk
@@ -95,7 +86,7 @@ BOOL CG46OpenPin(UIViewController *controller,NSString *identifier,NSString *tit
  CGWitness *cw=CG46Witness(cm),*hw=CG46Witness(hm),*sw=CG46Witness(sm);
  CGWitness *rw=CG46Witness(search),*dw=CG46Witness(dm);
  if(!CG46Bounds(cw)||!CG46Bounds(hw)||!CG46Bounds(sw)||!CG46Bounds(rw)||!CG46Bounds(dw)||!tuple) {
-  CG46Log(@"rejected=metadata");return NO;
+  (void)0;return NO;
  }
  size_t co=*(const uintptr_t *)((const uint8_t *)tuple+0x30);
  uint32_t hd=CG46Field(hm,4),hs=CG46Field(hm,5),cd=CG46Field(cm,3);
@@ -103,7 +94,7 @@ BOOL CG46OpenPin(UIViewController *controller,NSString *identifier,NSString *tit
     CG46Field(cm,0)!=0||CG46Field(cm,1)!=16||dw->size!=8||hd<50||
     hd+dw->size>hw->size||hs<hd+dw->size||hs+rw->size>hw->size||
     cd+dw->size>cw->size||co<hw->size||co+cw->size>sw->size) {
-  CG46Log(@"rejected=value_layout");return NO;
+  (void)0;return NO;
  }
  uint8_t *selection=calloc(1,sw->stride),*conv=calloc(1,cw->stride);
  if(!selection||!conv){free(selection);free(conv);return NO;}
@@ -127,12 +118,12 @@ BOOL CG46OpenPin(UIViewController *controller,NSString *identifier,NSString *tit
  free(conv);
  enumTag(selection,sm,1); // HistorySelection.historyItem(item, conversation:)
  if(pair[1])retain((void *)pair[1]);
- CG46Log([NSString stringWithFormat:@"dispatch=historyItem remote_id_set=1 cache_lookup=0 history_bytes_changed=0 item_size=%lu conversation_size=%lu",(unsigned long)hw->size,(unsigned long)cw->size]);
+ (void)0;
  CG46ObservedPinID=[identifier copy];
  CG46Select((void *)pair[0],(void *)pair[1],selection);
  if(pair[1])release((void *)pair[1]);
  sw->destroy(selection,sm);
  free(selection);
- CG46Log(@"callback_returned=1");
+ (void)0;
  return YES;
 }
