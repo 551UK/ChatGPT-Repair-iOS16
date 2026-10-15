@@ -117,8 +117,6 @@ static void CGFinishOlderRetry(CGOlderPageRetry *job) {
     NSData *data=job.lastData;
     NSURLResponse *response=job.lastResponse;
     NSError *error=job.lastError;
-    NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
-        ?((NSHTTPURLResponse *)response).statusCode:0;
     
     for(id waiter in waiters) {
         void (^completion)(NSData *,NSURLResponse *,NSError *)=waiter;
@@ -160,8 +158,6 @@ static void CGScheduleOlderRetry(CGOlderPageRetry *job) {
             session=[NSURLSession sessionWithConfiguration:configuration];
             [[session dataTaskWithRequest:replay completionHandler:^(NSData *data,NSURLResponse *response,NSError *error) {
                 [session finishTasksAndInvalidate];
-                NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
-                    ?((NSHTTPURLResponse *)response).statusCode:0;
                 
                 // Reuse v52 validation/cache semantics. The marker blocks
                 // another retry from being spawned for the owned session.
