@@ -8,6 +8,7 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+extern void CGRCompatibilityEnsureLoaded(void);
 #import <objc/message.h>
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
@@ -605,6 +606,7 @@ static void CGPinsDidChange(NSNotification *notification) {
 __attribute__((constructor)) static void CGPinnedBoot(void) {
     @autoreleasepool {
         if (![[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.openai.chat"]) return;
+        CGRCompatibilityEnsureLoaded();
         sPins = [CGPinnedSectionStore new];
         sPinWrites=[NSMutableSet set]; sHistoryTitles=[NSMutableDictionary dictionary];
         Method mf=class_getClassMethod(UIContextMenuConfiguration.class,@selector(configurationWithIdentifier:previewProvider:actionProvider:));
