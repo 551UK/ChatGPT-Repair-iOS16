@@ -6,7 +6,7 @@ It is a repackaging procedure, not a source-code restoration of opaque binaries.
 
 Usage:
  python3 scripts/package_combined.py --repair path/to/v53.deb \\
-    --compat path/to/ChatGBeFree-2.3.5.deb --out ChatGPTRepair_0.55.0_iphoneos-arm64.deb
+    --compat path/to/ChatGBeFree-2.3.5.deb --out ChatGPTRepair_0.55.1_iphoneos-arm64.deb
 """
 from __future__ import annotations
 import argparse, hashlib, pathlib, shutil, subprocess, tempfile, plistlib
@@ -24,7 +24,7 @@ def main():
     ap.add_argument('--repair', required=True, type=pathlib.Path)
     ap.add_argument('--compat', required=True, type=pathlib.Path)
     ap.add_argument('--out', required=True, type=pathlib.Path)
-    ap.add_argument('--version', default='0.55.0')
+    ap.add_argument('--version', default='0.55.1')
     ap.add_argument('--allow-v52-for-selftest', action='store_true', help='For static test packages only; never ship as v53')
     args = ap.parse_args()
     rv=dpkg_read(args.repair,'Version')
@@ -38,7 +38,7 @@ def main():
     for deb in (args.repair,args.compat):
         if dpkg_read(deb,'Architecture')!='iphoneos-arm64':
             ap.error('Expected rootless iphoneos-arm64 package')
-    if args.allow_v52_for_selftest and rv!='0.53.0' and args.version=='0.55.0':
+    if args.allow_v52_for_selftest and rv!='0.53.0' and args.version=='0.55.1':
         ap.error('Self-test packages MUST use an explicit -test version')
     with tempfile.TemporaryDirectory() as td:
         tmp=pathlib.Path(td); repair=tmp/'repair'; compat=tmp/'compat'; result=tmp/'merged';meta=tmp/'control'
@@ -74,13 +74,16 @@ Description: One install combining the validated {rv} history/pinning repair and
 '''
         if args.allow_v52_for_selftest and rv=='0.52.0': control=control.replace('One install combining','UNVERIFIED TEST ONLY; One install combining')
         (meta/'control').write_text(control)
-        lic=result/'usr/share/doc/chatgptrepair';lic.mkdir(parents=True)
+        lic=result/'var/jb/usr/share/doc/chatgptrepair';lic.mkdir(parents=True)
         (lic/'COMPONENTS').write_text('One DEB contains two unmodified compiled components.\n' +
           'ChatGPTRepair: user v53 source in project; compatibility: user-provided 2.3.5 prebuilt dylib.\n' +
           'The full editable 2.3.5 source was not available: do not claim that it can be rebuilt from source.\n' +
           'The combined package title is 551UK ChatGPTRepair. Original third-party rights remain unaffected.\n' +
           'See the GNU GPLv3 licence and original source attribution where applicable.\n')
         (lic/'COMPONENT-SHA256').write_text('\n'.join(f'{digest(result/TARGET/(stem+".dylib"))}  {stem}.dylib' for _,stem in srcs)+'\n')
+        forbidden = [p.name for p in result.iterdir() if p.name != 'var']
+        if forbidden:
+            raise RuntimeError('Non-rootless payload paths: ' + repr(forbidden))
         shutil.copytree(meta,result/'DEBIAN')
         args.out.parent.mkdir(parents=True,exist_ok=True)
         subprocess.run(['dpkg-deb','--build','--root-owner-group',str(result),str(args.out)],check=True)
