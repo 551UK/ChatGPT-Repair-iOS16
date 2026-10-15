@@ -68,6 +68,8 @@ void CGRCompatibilityEnsureLoaded(void) {
                 if (dlsym(gCGRCompatibilityHandle, functions[i])) found++;
                 else CGRCompatLog([NSString stringWithFormat:@"missing_export=%s", functions[i]]);
             }
+            NSString *effectiveVersion = [[NSBundle mainBundle] infoDictionary][@"CFBundleShortVersionString"] ?: @"(missing)";
+            CGRCompatLog([NSString stringWithFormat:@"effective_app_version=%@", effectiveVersion]);
             BOOL voiceProtocol = objc_getClass("LVBVoiceURLProtocol") != Nil;
             CGRCompatLog([NSString stringWithFormat:
                 @"component_exports=%u/%u voice_protocol_class=%d",
