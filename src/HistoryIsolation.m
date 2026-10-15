@@ -8,6 +8,7 @@
  */
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+extern void CGRCompatibilityEnsureLoaded(void);
 
 typedef BOOL (*CGRCanInitIMP)(id, SEL, NSURLRequest *);
 static CGRCanInitIMP sOriginalCanInit = NULL;
@@ -315,6 +316,7 @@ static void CGRInstallHistoryInterceptorProbe(void) {
 __attribute__((constructor)) static void CGRStart(void) {
     @autoreleasepool {
         if (![[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.openai.chat"]) return;
+        CGRCompatibilityEnsureLoaded();
         CGRLog(@"v0.9.0 browser history query experiment loaded; original interceptor preserved");
         CGRInstallBrowserListAdapter();
         CGRInstallHistoryInterceptorProbe();
