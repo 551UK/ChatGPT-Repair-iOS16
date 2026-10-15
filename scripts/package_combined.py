@@ -63,7 +63,7 @@ Architecture: iphoneos-arm64
 Section: Tweaks
 Priority: optional
 Maintainer: 551UK
-Author: 551UK (integration and v53); upstream component subject to original copyright
+Author: 551UK
 Depends: firmware (>= 16.0), mobilesubstrate
 Conflicts: com.liam.chatgbefree
 Replaces: com.liam.chatgbefree
