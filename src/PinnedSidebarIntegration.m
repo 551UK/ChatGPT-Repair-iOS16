@@ -181,6 +181,19 @@ static BOOL CGIsHistory(NSURLRequest *request) {
     return [url.path isEqualToString:@"/backend-api/conversations"] ||
            [url.path isEqualToString:@"/backend-api/conversations/"];
 }
+static BOOL CGIsConversationDetail(NSURLRequest *request) {
+    if (![request.HTTPMethod.uppercaseString isEqualToString:@"GET"]) return NO;
+    NSURL *url=request.URL;
+    NSString *host=url.host.lowercaseString;
+    if (!([host isEqualToString:@"chatgpt.com"] || [host hasSuffix:@".chatgpt.com"] ||
+          [host isEqualToString:@"openai.com"] || [host hasSuffix:@".openai.com"])) return NO;
+    NSArray<NSString *> *parts=[(url.path?:@"") componentsSeparatedByString:@"/"];
+    if (parts.count==4 && [parts[1] isEqualToString:@"backend-api"] &&
+        [parts[2] isEqualToString:@"conversation"] && [parts[3] length]) return YES;
+    if (parts.count==3 && [parts[1] isEqualToString:@"conversation"] &&
+        [parts[2] length]) return YES;
+    return NO;
+}
 static void CGRefreshPins(void) {
     NSURLSession *session = sMenuSession ?: sSession;
     NSURLRequest *request = sHistoryRequest;
@@ -240,12 +253,14 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
 @end
 @implementation NSURLSession (CGPinsHook)
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request {
+    if (CGIsConversationDetail(request)) CGOriginMergeConversationDidOpen();
     NSURLSessionDataTask *task = [self cgp_dataTaskWithRequest:request];
     CGSeeHistory(self,request);
     return task;
 }
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request
               completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completion {
+    if (CGIsConversationDetail(request)) CGOriginMergeConversationDidOpen();
     void (^forward)(NSData *,NSURLResponse *,NSError *)=completion;
     if (completion && self!=sMenuSession && CGIsHistory(request) &&
         ![[request valueForHTTPHeaderField:@"X-551UK-History-Retry"] isEqualToString:@"1"] &&

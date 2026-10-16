@@ -2,6 +2,55 @@
 
 static NSString *const kMergeHeader = @"X-551UK-History-Merge";
 
+@interface CGOriginPendingMerge : NSObject
+@property(nonatomic,copy) CGOriginMergeCompletion completion;
+@property(nonatomic,strong) NSData *data;
+@property(nonatomic,strong) NSURLResponse *response;
+@property(nonatomic,strong) NSError *error;
+@property(nonatomic,strong) NSURLSession *session;
+@property(nonatomic,assign) BOOL finished;
+@end
+@implementation CGOriginPendingMerge
+@end
+
+static NSObject *CGOriginPendingLock(void) {
+    static NSObject *lock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ lock=[NSObject new]; });
+    return lock;
+}
+static NSMutableSet<CGOriginPendingMerge *> *CGOriginPendings(void) {
+    static NSMutableSet *set;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ set=[NSMutableSet set]; });
+    return set;
+}
+static void CGOriginFinishPending(CGOriginPendingMerge *pending,
+                                  NSData *data, NSURLResponse *response,
+                                  NSError *error, BOOL cancelSession) {
+    if (!pending) return;
+    CGOriginMergeCompletion completion=nil;
+    NSURLSession *session=nil;
+    @synchronized(CGOriginPendingLock()) {
+        if (pending.finished) return;
+        pending.finished=YES;
+        completion=[pending.completion copy];
+        session=pending.session;
+        [CGOriginPendings() removeObject:pending];
+    }
+    if (cancelSession && session) [session invalidateAndCancel];
+    if (completion) completion(data,response,error);
+}
+void CGOriginMergeConversationDidOpen(void) {
+    NSArray<CGOriginPendingMerge *> *pending=nil;
+    @synchronized(CGOriginPendingLock()) {
+        pending=CGOriginPendings().allObjects;
+    }
+    for (CGOriginPendingMerge *item in pending) {
+        CGOriginFinishPending(item,item.data,item.response,item.error,YES);
+    }
+}
+
 static BOOL CGValidOriginHost(NSString *host) {
     NSString *h=host.lowercaseString;
     return [h isEqualToString:@"chatgpt.com"] || [h hasSuffix:@".chatgpt.com"] ||
@@ -136,6 +185,16 @@ void CGOriginMergePage(NSURLSessionConfiguration *configuration, NSURLRequest *r
     config.timeoutIntervalForRequest=12;
     config.timeoutIntervalForResource=30;
     __block NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
+    CGOriginPendingMerge *pending=[CGOriginPendingMerge new];
+    pending.completion=completion;
+    pending.data=data;
+    pending.response=response;
+    pending.error=error;
+    pending.session=session;
+    @synchronized(CGOriginPendingLock()) {
+        [CGOriginPendings() addObject:pending];
+    }
+
     dispatch_group_t group=dispatch_group_create();
     NSObject *lock=[NSObject new];
     __block NSData *tppData=nil, *normalData=offset?nil:data;
@@ -162,8 +221,9 @@ void CGOriginMergePage(NSURLSessionConfiguration *configuration, NSURLRequest *r
         }
         [session finishTasksAndInvalidate];
         session=nil;
-        // Always give the original completion a valid result; a rejected
-        // extra request must not blank an otherwise-working normal list.
-        completion(merged?:data,response,error);
+        // If a conversation was opened while this merge was pending, that
+        // path already forwarded the base response and marked this finished.
+        // Otherwise deliver the combined page exactly once.
+        CGOriginFinishPending(pending,merged?:data,response,error,NO);
     });
 }

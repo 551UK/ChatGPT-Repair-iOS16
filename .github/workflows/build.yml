@@ -73,7 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           export THEOS="$HOME/theos"
-          test "$(awk '/^Version:/ { print $2; exit }' control)" = "55.4"
+          test "$(awk '/^Version:/ { print $2; exit }' control)" = "55.5"
           set +e
           make package FINALPACKAGE=1 > "$RUNNER_TEMP/chatgptrepair-build.log" 2>&1
           status=$?
@@ -84,7 +84,7 @@ jobs:
           debs=(packages/*.deb)
           test "${#debs[@]}" -eq 1
           test "$(dpkg-deb -f "${debs[0]}" Package)" = "com.551uk.chatgptrepair"
-          test "$(dpkg-deb -f "${debs[0]}" Version)" = "55.4"
+          test "$(dpkg-deb -f "${debs[0]}" Version)" = "55.5"
           rootless_lib="$(mktemp -d)"
           dpkg-deb -x "${debs[0]}" "$rootless_lib"
           nm -gU "$rootless_lib/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib" | grep -F '_CGRCompatibilityEnsureLoaded' >/dev/null
@@ -98,13 +98,13 @@ jobs:
           python3 scripts/package_combined.py \
             --repair build-input/chatgptrepair-base.deb \
             --compat vendor/compatibility-2.3.5.deb \
-            --version 55.4 \
-            --out dist/ChatGPTRepair_55.4_iphoneos-arm64.deb
-          test "$(dpkg-deb -f dist/ChatGPTRepair_55.4_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
-          test "$(dpkg-deb -f dist/ChatGPTRepair_55.4_iphoneos-arm64.deb Version)" = "55.4"
+            --version 55.5 \
+            --out dist/ChatGPTRepair_55.5_iphoneos-arm64.deb
+          test "$(dpkg-deb -f dist/ChatGPTRepair_55.5_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
+          test "$(dpkg-deb -f dist/ChatGPTRepair_55.5_iphoneos-arm64.deb Version)" = "55.5"
           python3 - <<'PY'
           import subprocess
-          deb='dist/ChatGPTRepair_55.4_iphoneos-arm64.deb'
+          deb='dist/ChatGPTRepair_55.5_iphoneos-arm64.deb'
           contents=subprocess.check_output(['dpkg-deb','-c',deb],text=True)
           paths=[line.split(' ./',1)[1].strip() for line in contents.splitlines() if ' ./' in line]
           bad=[p for p in paths if p not in ('','var/','var') and not p.startswith('var/')]
@@ -117,7 +117,7 @@ jobs:
           target='var/jb/Library/MobileSubstrate/DynamicLibraries'
           with tempfile.TemporaryDirectory() as d:
               d=pathlib.Path(d)
-              for name,deb in [('repair','build-input/chatgptrepair-base.deb'),('compat','vendor/compatibility-2.3.5.deb'),('merged','dist/ChatGPTRepair_55.4_iphoneos-arm64.deb')]:
+              for name,deb in [('repair','build-input/chatgptrepair-base.deb'),('compat','vendor/compatibility-2.3.5.deb'),('merged','dist/ChatGPTRepair_55.5_iphoneos-arm64.deb')]:
                   out=d/name
                   subprocess.run(['dpkg-deb','-x',deb,str(out)],check=True)
               for stem,orig in [('ChatGPTRepair','repair'),('ChatGBeFree','compat')]:
@@ -133,8 +133,8 @@ jobs:
       - name: Save single installation DEB as build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ChatGPTRepair-55.4-single-DEB
-          path: dist/ChatGPTRepair_55.4_iphoneos-arm64.deb
+          name: ChatGPTRepair-55.5-single-DEB
+          path: dist/ChatGPTRepair_55.5_iphoneos-arm64.deb
           if-no-files-found: error
 
       - name: Publish ChatGPTRepair release
@@ -144,15 +144,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="v55.4"
-          artifact="dist/ChatGPTRepair_55.4_iphoneos-arm64.deb"
+          tag="v55.5"
+          artifact="dist/ChatGPTRepair_55.5_iphoneos-arm64.deb"
           cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
-          Adds both normal conversation groups to history.
+          Fixes chats disappearing after opening.
           NOTES
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "ChatGPTRepair v55.4" --notes-file "$RUNNER_TEMP/notes.md"
+            gh release create "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "ChatGPTRepair v55.5" --notes-file "$RUNNER_TEMP/notes.md"
           fi
 
       - name: Verify test release and preserve working rollback
@@ -162,7 +162,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release view v55.4 --repo "$GITHUB_REPOSITORY" --json assets \
-            --jq '.assets[].name' | grep -Fxq "ChatGPTRepair_55.4_iphoneos-arm64.deb"
+          gh release view v55.5 --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[].name' | grep -Fxq "ChatGPTRepair_55.5_iphoneos-arm64.deb"
+          gh release view v55.4 --repo "$GITHUB_REPOSITORY" >/dev/null
           gh release view v55.3 --repo "$GITHUB_REPOSITORY" >/dev/null
           gh release view v55.2 --repo "$GITHUB_REPOSITORY" >/dev/null
