@@ -142,7 +142,7 @@ void CGOriginMergePage(NSURLSessionConfiguration *configuration, NSURLRequest *r
     __block BOOL failed=NO;
     NSArray<NSURLRequest *> *requests=normal?@[tpp,normal]:@[tpp];
     for (NSURLRequest *extra in requests) {
-        BOOL isTPP=[extra.URL.query containsString:@"conversation_origin=tpp"];
+        BOOL isTPP=(extra==tpp);
         dispatch_group_enter(group);
         [[session dataTaskWithRequest:extra completionHandler:^(NSData *more, NSURLResponse *reply, NSError *networkError) {
             NSInteger status=[reply isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)reply).statusCode:0;
