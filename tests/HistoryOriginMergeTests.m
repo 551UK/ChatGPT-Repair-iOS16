@@ -27,17 +27,19 @@ int main(void) {
         NSData *first=CGOriginMergeJSON(JSON(normal),JSON(tpp),0,2);
         NSCAssert(first!=nil,@"first page merged");
         NSDictionary *firstPage=Parse(first);
-        NSCAssert([IDs(firstPage) isEqual:@[@"web-new",@"normal-new"]],@"global newest first");
+        NSArray *firstExpected=@[@"web-new",@"normal-new"];
+        NSCAssert([IDs(firstPage) isEqualToArray:firstExpected],@"global newest first");
         NSCAssert([firstPage[@"total"] integerValue]==4,@"combined total");
         NSData *second=CGOriginMergeJSON(JSON(normal),JSON(tpp),2,2);
-        NSCAssert([IDs(Parse(second)) isEqual:@[@"normal-old",@"tpp-old"]],@"correct second page");
+        NSArray *secondExpected=@[@"normal-old",@"tpp-old"];
+        NSCAssert([IDs(Parse(second)) isEqualToArray:secondExpected],@"correct second page");
         NSMutableDictionary *duplicate=[tpp mutableCopy];
         duplicate[@"items"]=@[
             @{@"id":@"web-new",@"update_time":@"2026-10-16T18:16:44Z"},
             @{@"id":@"normal-new",@"update_time":@"2026-10-16T18:13:33Z"}
         ];
         NSData *dedup=CGOriginMergeJSON(JSON(normal),JSON(duplicate),0,2);
-        NSCAssert([IDs(Parse(dedup)) isEqual:@[@"web-new",@"normal-new"]],@"no duplicate IDs");
+        NSCAssert([IDs(Parse(dedup)) isEqualToArray:firstExpected],@"no duplicate IDs");
         NSCAssert(CGOriginMergeJSON(JSON(normal),nil,0,2)==nil,@"unavailable origin fallback");
         NSURLRequest *r=[NSURLRequest requestWithURL:
             [NSURL URLWithString:@"https://chatgpt.com/backend-api/conversations?offset=0&limit=20"]];
