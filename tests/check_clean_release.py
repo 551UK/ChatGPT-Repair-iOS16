@@ -8,7 +8,7 @@ for file in main:
     for marker in ("CGRLog(", "CGPLog(", "CGCacheLog(", "CG46Log(", "CGRHistoryTaskObserver", "CGRInstallHistoryInterceptorProbe"):
         assert marker not in content, (file,marker)
 assert "CGHistoryPageResult" in (root/"src/HistoryPageCache.m").read_text()
-assert "CGOlderOffset(request)<20" in (root/"src/HistoryPageCache.m").read_text()
+assert "(offset!=0 && offset<20)" in (root/"src/HistoryPageCache.m").read_text()
 assert "CGSetPin(" in (root/"src/PinnedSidebarIntegration.m").read_text()
 assert "CG46OpenPin(" in (root/"src/DirectPinSelection.m").read_text()
 assert "CGRAdaptHistoryRequest" in (root/"src/HistoryIsolation.m").read_text()
