@@ -16,6 +16,7 @@ extern void CGRCompatibilityEnsureLoaded(void);
 #import <string.h>
 #import "PinService.h"
 #import "HistoryPageCache.h"
+#import "HistoryOriginMerge.h"
 #import "PinnedSectionStore.h"
 #import "PinnedSidebarView.h"
 #import "PinnedLayoutShim.h"
@@ -205,7 +206,8 @@ static void CGRefreshPins(void) {
 }
 static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
     if (session==sMenuSession || !CGIsHistory(request) ||
-        [[request valueForHTTPHeaderField:@"X-551UK-History-Retry"] isEqualToString:@"1"]) return;
+        ([[request valueForHTTPHeaderField:@"X-551UK-History-Retry"] isEqualToString:@"1"] ||
+         [[request valueForHTTPHeaderField:@"X-551UK-History-Merge"] isEqualToString:@"1"])) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         NSString *oldAuth=[sHistoryRequest valueForHTTPHeaderField:@"Authorization"];
         NSString *newAuth=[request valueForHTTPHeaderField:@"Authorization"];
@@ -246,14 +248,18 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
               completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completion {
     void (^forward)(NSData *,NSURLResponse *,NSError *)=completion;
     if (completion && self!=sMenuSession && CGIsHistory(request) &&
-        ![[request valueForHTTPHeaderField:@"X-551UK-History-Retry"] isEqualToString:@"1"]) {
+        ![[request valueForHTTPHeaderField:@"X-551UK-History-Retry"] isEqualToString:@"1"] &&
+        ![[request valueForHTTPHeaderField:@"X-551UK-History-Merge"] isEqualToString:@"1"]) {
         void (^originalForward)(NSData *,NSURLResponse *,NSError *)=forward;
         NSURLSessionConfiguration *historyConfig=[self.configuration copy];
         forward=^(NSData *data,NSURLResponse *response,NSError *error) {
             CGHistoryPageResult(request,historyConfig,data,response,error,
                 ^(NSData *usableData,NSURLResponse *usableResponse,NSError *usableError) {
-                    if (!usableError) CGRememberHistory(usableData);
-                    originalForward(usableData,usableResponse,usableError);
+                    CGOriginMergePage(historyConfig,request,usableData,usableResponse,usableError,
+                        ^(NSData *combined,NSURLResponse *combinedResponse,NSError *combinedError) {
+                            if (!combinedError) CGRememberHistory(combined);
+                            originalForward(combined,combinedResponse,combinedError);
+                        });
                 });
         };
     }
