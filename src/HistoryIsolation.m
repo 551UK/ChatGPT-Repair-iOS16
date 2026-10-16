@@ -78,9 +78,19 @@ static NSURLRequest *CGRAdaptHistoryRequest(NSURLRequest *request) {
     ];
     parts.queryItems = query;
     NSURL *url = parts.URL;
-    if (!url || [url isEqual:request.URL]) return request;
+    if (!url) return request;
+    BOOL firstPage = [offset isEqualToString:@"0"];
+    // Refresh the native first-page list from the server. The pinned list
+    // already bypasses HTTP caches; without this, normal chats can remain
+    // stale while pins and cross-device writes are working.
+    if ([url isEqual:request.URL] && !firstPage) return request;
     NSMutableURLRequest *adapted = [request mutableCopy];
-    adapted.URL = url; // Retains method, headers, cookies policy, timeout and body.
+    adapted.URL = url; // Preserves account headers and app session.
+    if (firstPage) {
+        adapted.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
+        [adapted setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
+        [adapted setValue:@"no-cache" forHTTPHeaderField:@"Pragma"];
+    }
     return adapted;
 }
 

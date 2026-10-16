@@ -4,6 +4,7 @@
 
 static const NSTimeInterval kMaxAge=6*60*60;
 static NSString * const kRetryHeader=@"X-551UK-History-Retry";
+static NSString * const kFinalRetryHeader=@"X-551UK-History-Retry-Final";
 
 static NSString * const kCacheHeader=@"X-551UK-History-Cache";
 
@@ -123,14 +124,38 @@ static void CGFinishOlderRetry(CGOlderPageRetry *job) {
         completion(data,response,error);
     }
 }
+static void CGFinishWithFirstPageFallback(CGOlderPageRetry *job) {
+    if (CGOlderOffset(job.request)!=0 ||
+        ![job.lastResponse isKindOfClass:NSHTTPURLResponse.class] ||
+        ((NSHTTPURLResponse *)job.lastResponse).statusCode!=429) {
+        CGFinishOlderRetry(job);
+        return;
+    }
+    // Only after bounded first-page retries have failed may we show saved
+    // history. Never report a six-hour-old page as a successful refresh
+    // while there is still a chance to obtain the latest conversations.
+    NSMutableURLRequest *finalRequest=[job.request mutableCopy];
+    [finalRequest setValue:@"1" forHTTPHeaderField:kRetryHeader];
+    [finalRequest setValue:@"1" forHTTPHeaderField:kFinalRetryHeader];
+    CGHistoryPageResult(finalRequest,job.configuration,job.lastData,
+        job.lastResponse,job.lastError,
+        ^(NSData *data,NSURLResponse *response,NSError *error) {
+            job.lastData=data;
+            job.lastResponse=response;
+            job.lastError=error;
+            CGFinishOlderRetry(job);
+        });
+}
 static void CGScheduleOlderRetry(CGOlderPageRetry *job) {
     if(!job)return;
-    static const NSTimeInterval backoff[]={15,35,70};
-    NSTimeInterval delay=backoff[MIN(job.attempts,2)];
+    static const NSTimeInterval olderBackoff[]={15,35,70};
+    static const NSTimeInterval freshBackoff[]={2,5,12};
+    NSUInteger attempt=MIN(job.attempts,2);
+    NSTimeInterval delay=CGOlderOffset(job.request)==0
+        ?freshBackoff[attempt]:olderBackoff[attempt];
     NSTimeInterval after=CGRetryAfter(job.lastResponse);
     if(after>300) {
-        
-        CGFinishOlderRetry(job);
+        CGFinishWithFirstPageFallback(job);
         return;
     }
     delay=MAX(delay,after);
@@ -171,7 +196,7 @@ static void CGScheduleOlderRetry(CGOlderPageRetry *job) {
                         if(!usableError && usableStatus==429 && job.attempts<3) {
                             CGScheduleOlderRetry(job);
                         } else {
-                            CGFinishOlderRetry(job);
+                            CGFinishWithFirstPageFallback(job);
                         }
                     });
             }] resume];
@@ -187,7 +212,8 @@ static void CGScheduleOlderRetry(CGOlderPageRetry *job) {
 static BOOL CGEnqueueOlderRetry(NSString *key, NSURLRequest *request,
         NSURLSessionConfiguration *configuration,NSData *data,NSURLResponse *response,
         NSError *error,void (^completion)(NSData *,NSURLResponse *,NSError *)) {
-    if(!key || !completion || error || CGOlderOffset(request)<20 ||
+    NSUInteger offset=CGOlderOffset(request);
+    if(!key || !completion || error || (offset!=0 && offset<20) ||
        [[request valueForHTTPHeaderField:kRetryHeader] isEqualToString:@"1"])
         return NO;
     CGOlderPageRetry *job=nil; BOOL first=NO;
@@ -214,6 +240,16 @@ void CGHistoryPageResult(NSURLRequest *request,NSURLSessionConfiguration *config
     void (^completion)(NSData *,NSURLResponse *,NSError *)) {
     NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;
     NSString *key=CGPageKey(request,configuration);
+    BOOL firstPage=CGOlderOffset(request)==0;
+    BOOL retryRequest=[[request valueForHTTPHeaderField:kRetryHeader] isEqualToString:@"1"];
+    BOOL finalRetry=[[request valueForHTTPHeaderField:kFinalRetryHeader] isEqualToString:@"1"];
+    // The original v53 code returned up to six-hour-old history immediately
+    // on HTTP 429. Give a first-page refresh bounded attempts to get fresh
+    // conversations before using a saved page as a final fallback.
+    if(status==429 && !error && firstPage && !retryRequest &&
+       CGRetryAfter(response)<=300 &&
+       CGEnqueueOlderRetry(key,request,configuration,data,response,error,completion))
+        return;
     NSData *fallback=nil;
     if(key && !error && (status==200 || status==429)) {
         @synchronized([NSURLCache class]) {
@@ -241,6 +277,7 @@ void CGHistoryPageResult(NSURLRequest *request,NSURLSessionConfiguration *config
                 if(saved)[fm setAttributes:@{NSFileProtectionKey:NSFileProtectionCompleteUntilFirstUserAuthentication} ofItemAtPath:path error:NULL];
                 
             } else if(status==429 && age>=0 && age<=kMaxAge &&
+                      (!firstPage || !retryRequest || finalRetry) &&
                       [cached isKindOfClass:NSData.class] && CGValidPage(cached)) {
                 fallback=cached;
             }
