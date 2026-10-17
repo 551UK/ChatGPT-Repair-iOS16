@@ -1,3 +1,4 @@
+// LinkFix2: setter-only swizzles; avoids inherited UIView lifecycle method exchange.
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
