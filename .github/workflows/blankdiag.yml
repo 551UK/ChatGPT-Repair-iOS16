@@ -1,0 +1,109 @@
+name: Build blank chats diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [linkfix2test]
+    paths:
+      - 'diag/**'
+      - '.github/workflows/blankdiag.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install dpkg ldid xz
+
+      - name: Download iOS 16.5 SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/ios-sdk"
+          curl -fL --retry 3             -o "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz"             "https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz"
+          tar -xJf "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" -C "$HOME/ios-sdk"
+          test -d "$HOME/ios-sdk/iPhoneOS16.5.sdk"
+
+      - name: Compile passive diagnostic dylib
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build dist
+          SDK="$HOME/ios-sdk/iPhoneOS16.5.sdk"
+          clang             -target arm64-apple-ios16.0             -isysroot "$SDK"             -fobjc-arc -fblocks             -dynamiclib             -framework Foundation             -framework UIKit             -Wno-deprecated-declarations             -Wl,-install_name,/var/jb/Library/MobileSubstrate/DynamicLibraries/ZZZZChatGPTBlankDiag.dylib             diag/ZZChatGPTBlankDiag.m             -o build/ZZZZChatGPTBlankDiag.dylib
+          ldid -S build/ZZZZChatGPTBlankDiag.dylib
+          file build/ZZZZChatGPTBlankDiag.dylib
+          strings build/ZZZZChatGPTBlankDiag.dylib | grep -F "ChatGPT Blank Chats Diagnostic 1 launch" >/dev/null
+
+      - name: Download exact clean v55.7 baseline artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/base-artifact
+          gh run download 38992895566             --repo "$GITHUB_REPOSITORY"             --name "ChatGPTRepair-55.7-clean"             --dir build/base-artifact
+          cp build/base-artifact/ChatGPTRepair_55.7_iphoneos-arm64.deb build/ChatGPTRepair_55.7_iphoneos-arm64.deb
+          actual="$(shasum -a 256 build/ChatGPTRepair_55.7_iphoneos-arm64.deb | awk '{print $1}')"
+          expected="f16f1869a44dcb913321e91723d0181e56d240377d71dc35913ac61a0397cf8d"
+          test "$actual" = "$expected"
+          test "$(dpkg-deb -f build/ChatGPTRepair_55.7_iphoneos-arm64.deb Version)" = "55.7"
+
+      - name: Add diagnostic only
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/pkgroot build/basecheck build/newcheck
+          mkdir -p build/pkgroot build/basecheck build/newcheck
+          dpkg-deb -R build/ChatGPTRepair_55.7_iphoneos-arm64.deb build/pkgroot
+
+          target="build/pkgroot/var/jb/Library/MobileSubstrate/DynamicLibraries"
+          cp build/ZZZZChatGPTBlankDiag.dylib "$target/ZZZZChatGPTBlankDiag.dylib"
+          cat > "$target/ZZZZChatGPTBlankDiag.plist" <<'PLIST'
+          { Filter = { Bundles = ( "com.openai.chat" ); }; }
+          PLIST
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("build/pkgroot/DEBIAN/control")
+          text=p.read_text()
+          if "Version: 55.7\n" not in text:
+              raise SystemExit("expected v55.7 baseline")
+          p.write_text(text.replace("Version: 55.7\n","Version: 55.7-blankdiag1\n",1))
+          PY
+
+          dpkg-deb --root-owner-group -b build/pkgroot dist/ChatGPTRepair_55.7-blankdiag1_iphoneos-arm64.deb
+          test "$(dpkg-deb -f dist/ChatGPTRepair_55.7-blankdiag1_iphoneos-arm64.deb Version)" = "55.7-blankdiag1"
+
+      - name: Verify production files unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          dpkg-deb -x build/ChatGPTRepair_55.7_iphoneos-arm64.deb build/basecheck
+          dpkg-deb -x dist/ChatGPTRepair_55.7-blankdiag1_iphoneos-arm64.deb build/newcheck
+          base="build/basecheck/var/jb/Library/MobileSubstrate/DynamicLibraries"
+          final="build/newcheck/var/jb/Library/MobileSubstrate/DynamicLibraries"
+
+          for file in             ChatGPTRepair.dylib ChatGPTRepair.plist             ChatGBeFree.dylib ChatGBeFree.plist             ZZChatGPTDownloadFix.dylib ZZChatGPTDownloadFix.plist             ZZChatGPTLinkFix.dylib ZZChatGPTLinkFix.plist; do
+            cmp "$base/$file" "$final/$file"
+          done
+
+          test -f "$final/ZZZZChatGPTBlankDiag.dylib"
+          test -f "$final/ZZZZChatGPTBlankDiag.plist"
+          shasum -a 256 dist/ChatGPTRepair_55.7-blankdiag1_iphoneos-arm64.deb
+
+      - name: Upload diagnostic DEB
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatGPTRepair-55.7-blankdiag1
+          path: dist/ChatGPTRepair_55.7-blankdiag1_iphoneos-arm64.deb
+          if-no-files-found: error
