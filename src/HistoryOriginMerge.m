@@ -190,16 +190,23 @@ static void CGOriginFetchWithRetry(NSURLSession *session, NSURLRequest *request,
                                    void (^completion)(NSData *,NSURLResponse *,NSError *)) {
     if (!session || !request || !completion) return;
     void (^start)(void)=^{
-        [[session dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error) {
-            NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
-                ?((NSHTTPURLResponse *)response).statusCode:0;
-            if (!error && status==429 && attempt<2) {
-                NSTimeInterval retryDelay=CGOriginRetryDelay(response,attempt);
-                CGOriginFetchWithRetry(session,request,attempt+1,retryDelay,completion);
-                return;
-            }
-            completion(data,response,error);
-        }] resume];
+        @try {
+            [[session dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error) {
+                NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
+                    ?((NSHTTPURLResponse *)response).statusCode:0;
+                if (!error && status==429 && attempt<2) {
+                    NSTimeInterval retryDelay=CGOriginRetryDelay(response,attempt);
+                    CGOriginFetchWithRetry(session,request,attempt+1,retryDelay,completion);
+                    return;
+                }
+                completion(data,response,error);
+            }] resume];
+        } @catch (__unused NSException *exception) {
+            NSError *cancel=[NSError errorWithDomain:NSURLErrorDomain
+                code:NSURLErrorCancelled
+                userInfo:@{NSLocalizedDescriptionKey:@"History merge retry session was no longer active"}];
+            completion(nil,nil,cancel);
+        }
     };
     if (startDelay>0) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(startDelay*NSEC_PER_SEC)),
