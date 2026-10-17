@@ -1,6 +1,6 @@
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
-main=["CompatibilityBoot.m","HistoryIsolation.m","HistoryPageCache.m","PinnedSidebarIntegration.m","DirectPinSelection.m","DownloadFix.m"]
+main=["CompatibilityBoot.m","HistoryIsolation.m","HistoryPageCache.m","PinnedSidebarIntegration.m","DirectPinSelection.m","DownloadFix.m","LinkFix.m"]
 for file in main:
     content=(root/"src"/file).read_text()
     assert "ChatGPT551Repair.log" not in content, file
@@ -16,4 +16,7 @@ assert "CGRCompatibilityEnsureLoaded" in (root/"src/CompatibilityBoot.m").read_t
 assert "ChatGPTRepairDownloadFixTest.log" in (root/"src/DownloadFix.m").read_text()
 assert "removeItemAtPath" in (root/"src/DownloadFix.m").read_text()
 assert "CGRLog(" not in (root/"src/DownloadFix.m").read_text()
+assert "didMoveToWindow" not in (root/"src/LinkFix.m").read_text()
+assert "\\uE200url\\uE202" in (root/"src/LinkFix.m").read_text()
+assert "NSDataDetector" in (root/"src/LinkFix.m").read_text()
 print("PASS: no diagnostic log writers or passive history probes; required features intact")
