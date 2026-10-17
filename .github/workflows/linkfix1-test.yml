@@ -3,7 +3,7 @@ name: Build ChatGPTRepair link fix2 test
 on:
   workflow_dispatch:
   push:
-    branches: [linkfix2test]
+    branches: [linkfix1test]
     paths:
       - 'link-test/**'
       - '.github/workflows/linkfix1-test.yml'
