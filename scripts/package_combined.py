@@ -28,8 +28,8 @@ def main():
     args = ap.parse_args()
     rv=dpkg_read(args.repair,'Version')
     cv=dpkg_read(args.compat,'Version')
-    if rv!='55.5':
-        ap.error(f'Expected ChatGPTRepair 55.5 build input; got {rv}')
+    if rv!=args.version:
+        ap.error(f'Expected matching ChatGPTRepair build input; got {rv}')
     if dpkg_read(args.repair,'Package')!='com.551uk.chatgptrepair':
         ap.error('Unexpected repair package identifier')
     if cv!='2.3.5' or dpkg_read(args.compat,'Package')!='com.liam.chatgbefree':
