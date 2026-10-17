@@ -243,13 +243,10 @@ void CGHistoryPageResult(NSURLRequest *request,NSURLSessionConfiguration *config
     BOOL firstPage=CGOlderOffset(request)==0;
     BOOL retryRequest=[[request valueForHTTPHeaderField:kRetryHeader] isEqualToString:@"1"];
     BOOL finalRetry=[[request valueForHTTPHeaderField:kFinalRetryHeader] isEqualToString:@"1"];
-    // The original v53 code returned up to six-hour-old history immediately
-    // on HTTP 429. Give a first-page refresh bounded attempts to get fresh
-    // conversations before using a saved page as a final fallback.
-    if(status==429 && !error && firstPage && !retryRequest &&
-       CGRetryAfter(response)<=300 &&
-       CGEnqueueOlderRetry(key,request,configuration,data,response,error,completion))
-        return;
+    // Rate-limit fix: if the first page is already cached, prefer that
+    // immediately on HTTP 429 instead of generating a burst of 2/5/12-second
+    // retries. If no usable cache exists, the bounded retry path below still
+    // runs exactly as before.
     NSData *fallback=nil;
     if(key && !error && (status==200 || status==429)) {
         @synchronized([NSURLCache class]) {
