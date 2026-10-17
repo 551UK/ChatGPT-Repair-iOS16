@@ -17,6 +17,6 @@ assert "ChatGPTRepairDownloadFixTest.log" in (root/"src/DownloadFix.m").read_tex
 assert "removeItemAtPath" in (root/"src/DownloadFix.m").read_text()
 assert "CGRLog(" not in (root/"src/DownloadFix.m").read_text()
 assert "didMoveToWindow" not in (root/"src/LinkFix.m").read_text()
-assert "\ue200url\ue202" in (root/"src/LinkFix.m").read_text()
+assert "richPattern" in (root/"src/LinkFix.m").read_text()\nassert "NSRegularExpression" in (root/"src/LinkFix.m").read_text()
 assert "NSDataDetector" in (root/"src/LinkFix.m").read_text()
 print("PASS: no diagnostic log writers or passive history probes; required features intact")
