@@ -1,10 +1,11 @@
-"""Offline regression checks for fresh normal chat-list refresh."""
+"""Offline regression checks for history refresh and HTTP 429 handling."""
 from pathlib import Path
 
 root=Path(__file__).resolve().parents[1]
 adapter=(root/"src/HistoryIsolation.m").read_text()
 cache=(root/"src/HistoryPageCache.m").read_text()
 pins=(root/"src/PinnedSidebarIntegration.m").read_text()
+merge=(root/"src/HistoryOriginMerge.m").read_text()
 
 assert "NSURLRequestReloadIgnoringLocalCacheData" in adapter
 assert 'setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"' in adapter
@@ -13,16 +14,35 @@ assert 'if (firstPage)' in adapter
 assert 'exclude_conversation_origin' in adapter
 assert 'CGRAdaptHistoryRequest' in adapter
 
-# A failed first-page refresh must attempt fresh authenticated network pages
-# before showing the old cached 200 response.
-assert cache.index("CGEnqueueOlderRetry(key,request,configuration,data,response,error,completion)") < cache.index("NSData *fallback=nil;")
+# On HTTP 429, a valid cached first page must be considered before starting
+# another rapid retry burst. If no cache exists, the existing bounded retry
+# path remains available.
+assert "NSData *fallback=nil;" in cache
+assert cache.index("NSData *fallback=nil;") < cache.rindex("CGEnqueueOlderRetry(key,request,configuration,data,response,error,completion)")
 assert "BOOL firstPage=CGOlderOffset(request)==0;" in cache
 assert '(!firstPage || !retryRequest || finalRetry)' in cache
-assert 'freshBackoff[]={2,5,12}' in cache
 assert 'olderBackoff[]={15,35,70}' in cache
 assert 'static void CGFinishWithFirstPageFallback' in cache
 assert 'if(!key || !completion || error || (offset!=0 && offset<20)' in cache
 assert 'CGFinishWithFirstPageFallback(job);' in cache
+assert "rate-limit-fallback" in cache
+
+# TPP history merging must tolerate 429s rather than immediately dropping the
+# extra-origin page and making conversations disappear.
+assert "CGOriginFetchWithRetry" in merge
+assert "CGOriginRetryDelay" in merge
+assert 'Retry-After' in merge
+assert 'baseWasRateLimitFallback' in merge
+assert 'initialDelay=baseWasRateLimitFallback?8.0:0.0' in merge
+assert 'NSURLErrorCancelled' in merge
+
+# Conversation detail requests that return 429 must be held and retried instead
+# of forwarding the failed response to the old app as a blank conversation.
+assert 'X-551UK-Detail-Retry' in pins
+assert 'CGRetryConversationDetail' in pins
+assert 'CGDetailRetryDelay' in pins
+assert 'status==429' in pins
+assert 'originalDetailForward' in pins
 
 # Existing pin/unpin hooks, native navigation and older-page retries remain.
 assert 'CGSetPin(' in pins and 'CG46OpenPin(' in pins
@@ -30,4 +50,4 @@ assert 'CGHistoryPageResult(' in pins
 assert "job.attempts<3" in cache
 assert 'X-551UK-History-Retry' in pins
 
-print("PASS: first-page no-cache refresh, bounded 429 retries, eventual fallback, and existing pin behaviour")
+print("PASS: cached 429 fallback, TPP merge retry, detail retry, and existing pin/history behaviour")
