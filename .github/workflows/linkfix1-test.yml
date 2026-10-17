@@ -1,9 +1,9 @@
-name: Build ChatGPTRepair link fix1 test
+name: Build ChatGPTRepair link fix2 test
 
 on:
   workflow_dispatch:
   push:
-    branches: [linkfix1test]
+    branches: [linkfix2test]
     paths:
       - 'link-test/**'
       - '.github/workflows/linkfix1-test.yml'
@@ -48,11 +48,11 @@ jobs:
             -framework Foundation \
             -framework UIKit \
             -Wno-deprecated-declarations \
-            -Wl,-install_name,/var/jb/Library/MobileSubstrate/DynamicLibraries/ZZChatGPTLinkFix1.dylib \
-            link-test/ZZChatGPTLinkFix1.m \
-            -o build/ZZChatGPTLinkFix1.dylib
-          ldid -S build/ZZChatGPTLinkFix1.dylib
-          file build/ZZChatGPTLinkFix1.dylib
+            -Wl,-install_name,/var/jb/Library/MobileSubstrate/DynamicLibraries/ZZChatGPTLinkFix2.dylib \
+            link-test/ZZChatGPTLinkFix2.m \
+            -o build/ZZChatGPTLinkFix2.dylib
+          ldid -S build/ZZChatGPTLinkFix2.dylib
+          file build/ZZChatGPTLinkFix2.dylib
 
       - name: Download exact released v55.6 baseline
         shell: bash
@@ -75,8 +75,8 @@ jobs:
           dpkg-deb -R build/ChatGPTRepair_55.6_iphoneos-arm64.deb build/pkgroot
 
           target="build/pkgroot/var/jb/Library/MobileSubstrate/DynamicLibraries"
-          cp build/ZZChatGPTLinkFix1.dylib "$target/ZZChatGPTLinkFix1.dylib"
-          cat > "$target/ZZChatGPTLinkFix1.plist" <<'PLIST'
+          cp build/ZZChatGPTLinkFix2.dylib "$target/ZZChatGPTLinkFix2.dylib"
+          cat > "$target/ZZChatGPTLinkFix2.plist" <<'PLIST'
           { Filter = { Bundles = ( "com.openai.chat" ); }; }
           PLIST
 
@@ -87,12 +87,12 @@ jobs:
           old = "Version: 55.6\n"
           if old not in text:
               raise SystemExit("55.6 control version not found")
-          p.write_text(text.replace(old, "Version: 55.7-linkfix1test\n", 1))
+          p.write_text(text.replace(old, "Version: 55.7-linkfix2test\n", 1))
           PY
 
-          dpkg-deb --root-owner-group -b build/pkgroot dist/ChatGPTRepair_55.7-linkfix1test_iphoneos-arm64.deb
-          test "$(dpkg-deb -f dist/ChatGPTRepair_55.7-linkfix1test_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
-          test "$(dpkg-deb -f dist/ChatGPTRepair_55.7-linkfix1test_iphoneos-arm64.deb Version)" = "55.7-linkfix1test"
+          dpkg-deb --root-owner-group -b build/pkgroot dist/ChatGPTRepair_55.7-linkfix2test_iphoneos-arm64.deb
+          test "$(dpkg-deb -f dist/ChatGPTRepair_55.7-linkfix2test_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
+          test "$(dpkg-deb -f dist/ChatGPTRepair_55.7-linkfix2test_iphoneos-arm64.deb Version)" = "55.7-linkfix2test"
 
       - name: Verify v55.6 baseline files remain byte-for-byte unchanged
         shell: bash
@@ -101,18 +101,18 @@ jobs:
           rm -rf build/basecheck build/newcheck
           mkdir -p build/basecheck build/newcheck
           dpkg-deb -x build/ChatGPTRepair_55.6_iphoneos-arm64.deb build/basecheck
-          dpkg-deb -x dist/ChatGPTRepair_55.7-linkfix1test_iphoneos-arm64.deb build/newcheck
+          dpkg-deb -x dist/ChatGPTRepair_55.7-linkfix2test_iphoneos-arm64.deb build/newcheck
           target="var/jb/Library/MobileSubstrate/DynamicLibraries"
 
           for f in ChatGPTRepair.dylib ChatGPTRepair.plist ChatGBeFree.dylib ChatGBeFree.plist ZZChatGPTDownloadFix.dylib ZZChatGPTDownloadFix.plist; do
             cmp "build/basecheck/$target/$f" "build/newcheck/$target/$f"
           done
-          test -f "build/newcheck/$target/ZZChatGPTLinkFix1.dylib"
-          test -f "build/newcheck/$target/ZZChatGPTLinkFix1.plist"
+          test -f "build/newcheck/$target/ZZChatGPTLinkFix2.dylib"
+          test -f "build/newcheck/$target/ZZChatGPTLinkFix2.plist"
 
       - name: Upload link fix test DEB
         uses: actions/upload-artifact@v4
         with:
-          name: ChatGPTRepair-55.7-linkfix1test
-          path: dist/ChatGPTRepair_55.7-linkfix1test_iphoneos-arm64.deb
+          name: ChatGPTRepair-55.7-linkfix2test
+          path: dist/ChatGPTRepair_55.7-linkfix2test_iphoneos-arm64.deb
           if-no-files-found: error
