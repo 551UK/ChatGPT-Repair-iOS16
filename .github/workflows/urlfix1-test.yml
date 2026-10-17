@@ -1,0 +1,108 @@
+name: Build ChatGPTRepair URL fix1 test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [urlfix1test]
+    paths:
+      - 'url-test/**'
+      - '.github/workflows/urlfix1-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install dpkg ldid xz
+
+      - name: Download iOS 16.5 SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/ios-sdk"
+          curl -fL --retry 3             -o "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz"             "https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz"
+          tar -xJf "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" -C "$HOME/ios-sdk"
+          test -d "$HOME/ios-sdk/iPhoneOS16.5.sdk"
+
+      - name: Compile URL rendering compatibility test
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          SDK="$HOME/ios-sdk/iPhoneOS16.5.sdk"
+          clang             -target arm64-apple-ios16.0             -isysroot "$SDK"             -fobjc-arc -fblocks             -dynamiclib             -framework Foundation             -framework UIKit             -Wl,-install_name,/var/jb/Library/MobileSubstrate/DynamicLibraries/ZZChatGPTRichURLFix1.dylib             url-test/ZZChatGPTRichURLFix1.m             -o build/ZZChatGPTRichURLFix1.dylib
+          ldid -S build/ZZChatGPTRichURLFix1.dylib
+          file build/ZZChatGPTRichURLFix1.dylib
+          strings build/ZZChatGPTRichURLFix1.dylib | grep -F "ChatGPTRepair URL fix1 test launch" >/dev/null
+
+      - name: Download exact released v55.6 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3             -o build/ChatGPTRepair_55.6_iphoneos-arm64.deb             "https://github.com/551UK/ChatGPT-Repair-iOS16/releases/download/v55.6/ChatGPTRepair_55.6_iphoneos-arm64.deb"
+          actual="$(shasum -a 256 build/ChatGPTRepair_55.6_iphoneos-arm64.deb | awk '{print $1}')"
+          expected="461d57449b13b1bba10fca9ae142e185bcded16f18b2db6c6126b6dd1fcb65e6"
+          test "$actual" = "$expected"
+          test "$(dpkg-deb -f build/ChatGPTRepair_55.6_iphoneos-arm64.deb Version)" = "55.6"
+
+      - name: Add only URL fix1 test dylib
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/pkgroot build/basecheck build/newcheck
+          mkdir -p build/pkgroot dist
+          dpkg-deb -R build/ChatGPTRepair_55.6_iphoneos-arm64.deb build/pkgroot
+
+          target="build/pkgroot/var/jb/Library/MobileSubstrate/DynamicLibraries"
+          mkdir -p "$target"
+          cp build/ZZChatGPTRichURLFix1.dylib "$target/ZZChatGPTRichURLFix1.dylib"
+          cat > "$target/ZZChatGPTRichURLFix1.plist" <<'PLIST'
+          { Filter = { Bundles = ( "com.openai.chat" ); }; }
+          PLIST
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build/pkgroot/DEBIAN/control")
+          text = p.read_text()
+          old = "Version: 55.6\n"
+          if old not in text:
+              raise SystemExit("55.6 control version not found")
+          p.write_text(text.replace(old, "Version: 55.7-urlfix1test\n", 1))
+          PY
+
+          dpkg-deb --root-owner-group -b build/pkgroot dist/ChatGPTRepair_55.7-urlfix1test_iphoneos-arm64.deb
+          test "$(dpkg-deb -f dist/ChatGPTRepair_55.7-urlfix1test_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
+          test "$(dpkg-deb -f dist/ChatGPTRepair_55.7-urlfix1test_iphoneos-arm64.deb Version)" = "55.7-urlfix1test"
+
+      - name: Verify v55.6 baseline components are byte-for-byte unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/basecheck build/newcheck
+          dpkg-deb -x build/ChatGPTRepair_55.6_iphoneos-arm64.deb build/basecheck
+          dpkg-deb -x dist/ChatGPTRepair_55.7-urlfix1test_iphoneos-arm64.deb build/newcheck
+          target="var/jb/Library/MobileSubstrate/DynamicLibraries"
+
+          for file in ChatGPTRepair.dylib ChatGPTRepair.plist ChatGBeFree.dylib ChatGBeFree.plist ZZChatGPTDownloadFix.dylib ZZChatGPTDownloadFix.plist; do
+            cmp "build/basecheck/$target/$file" "build/newcheck/$target/$file"
+          done
+
+          test -f "build/newcheck/$target/ZZChatGPTRichURLFix1.dylib"
+          test -f "build/newcheck/$target/ZZChatGPTRichURLFix1.plist"
+          echo "v55.6 baseline components unchanged."
+          shasum -a 256 dist/ChatGPTRepair_55.7-urlfix1test_iphoneos-arm64.deb
+
+      - name: Upload URL fix1 test DEB
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatGPTRepair-55.7-urlfix1test
+          path: dist/ChatGPTRepair_55.7-urlfix1test_iphoneos-arm64.deb
+          if-no-files-found: error
