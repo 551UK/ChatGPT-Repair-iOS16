@@ -22,6 +22,7 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Theos and iOS 16.5 SDK
         shell: bash
         run: |
@@ -68,12 +69,33 @@ jobs:
             -o "$RUNNER_TEMP/HistoryOriginMergeTests"
           "$RUNNER_TEMP/HistoryOriginMergeTests"
 
+      - name: Compile clean download fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-input
+          SDK="$HOME/theos/sdks/iPhoneOS16.5.sdk"
+          clang \
+            -target arm64-apple-ios16.0 \
+            -isysroot "$SDK" \
+            -fobjc-arc -fblocks \
+            -dynamiclib \
+            -framework Foundation \
+            -Wl,-install_name,/var/jb/Library/MobileSubstrate/DynamicLibraries/ZZChatGPTDownloadFix.dylib \
+            src/DownloadFix.m \
+            -o build-input/ZZChatGPTDownloadFix.dylib
+          ldid -S build-input/ZZChatGPTDownloadFix.dylib
+          file build-input/ZZChatGPTDownloadFix.dylib
+          cat > build-input/ZZChatGPTDownloadFix.plist <<'PLIST'
+          { Filter = { Bundles = ( "com.openai.chat" ); }; }
+          PLIST
+
       - name: Compile ChatGPTRepair sources from main
         shell: bash
         run: |
           set -euo pipefail
           export THEOS="$HOME/theos"
-          test "$(awk '/^Version:/ { print $2; exit }' control)" = "55.5"
+          test "$(awk '/^Version:/ { print $2; exit }' control)" = "55.6"
           set +e
           make package FINALPACKAGE=1 > "$RUNNER_TEMP/chatgptrepair-build.log" 2>&1
           status=$?
@@ -84,57 +106,90 @@ jobs:
           debs=(packages/*.deb)
           test "${#debs[@]}" -eq 1
           test "$(dpkg-deb -f "${debs[0]}" Package)" = "com.551uk.chatgptrepair"
-          test "$(dpkg-deb -f "${debs[0]}" Version)" = "55.5"
+          test "$(dpkg-deb -f "${debs[0]}" Version)" = "55.6"
           rootless_lib="$(mktemp -d)"
           dpkg-deb -x "${debs[0]}" "$rootless_lib"
           nm -gU "$rootless_lib/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib" | grep -F '_CGRCompatibilityEnsureLoaded' >/dev/null
-          mkdir -p build-input
           cp "${debs[0]}" build-input/chatgptrepair-base.deb
 
-      - name: Combine into one ChatGPTRepair rootless installer
+      - name: Combine core and compatibility components
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p dist
           python3 scripts/package_combined.py \
             --repair build-input/chatgptrepair-base.deb \
             --compat vendor/compatibility-2.3.5.deb \
-            --version 55.5 \
-            --out dist/ChatGPTRepair_55.5_iphoneos-arm64.deb
-          test "$(dpkg-deb -f dist/ChatGPTRepair_55.5_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
-          test "$(dpkg-deb -f dist/ChatGPTRepair_55.5_iphoneos-arm64.deb Version)" = "55.5"
-          python3 - <<'PY'
-          import subprocess
-          deb='dist/ChatGPTRepair_55.5_iphoneos-arm64.deb'
-          contents=subprocess.check_output(['dpkg-deb','-c',deb],text=True)
-          paths=[line.split(' ./',1)[1].strip() for line in contents.splitlines() if ' ./' in line]
-          bad=[p for p in paths if p not in ('','var/','var') and not p.startswith('var/')]
-          assert not bad, 'Read-only iOS system path in DEB: '+repr(bad)
-          assert any('var/jb/usr/share/doc/chatgptrepair/' in p for p in paths), 'Missing rootless docs'
-          print('Verified all',len(paths),'archive members remain under rootless /var/jb')
-          PY
+            --version 55.6 \
+            --out dist/ChatGPTRepair_55.6_core_iphoneos-arm64.deb
+          test "$(dpkg-deb -f dist/ChatGPTRepair_55.6_core_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
+          test "$(dpkg-deb -f dist/ChatGPTRepair_55.6_core_iphoneos-arm64.deb Version)" = "55.6"
+
+      - name: Add proven clean download fix to final DEB
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/chatgptrepair-final"
+          rm -rf "$root"
+          dpkg-deb -R dist/ChatGPTRepair_55.6_core_iphoneos-arm64.deb "$root"
+
+          target="$root/var/jb/Library/MobileSubstrate/DynamicLibraries"
+          cp build-input/ZZChatGPTDownloadFix.dylib "$target/ZZChatGPTDownloadFix.dylib"
+          cp build-input/ZZChatGPTDownloadFix.plist "$target/ZZChatGPTDownloadFix.plist"
+
+          dpkg-deb --root-owner-group -b "$root" dist/ChatGPTRepair_55.6_iphoneos-arm64.deb
+          rm -f dist/ChatGPTRepair_55.6_core_iphoneos-arm64.deb
+
+          test "$(dpkg-deb -f dist/ChatGPTRepair_55.6_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
+          test "$(dpkg-deb -f dist/ChatGPTRepair_55.6_iphoneos-arm64.deb Version)" = "55.6"
+
+      - name: Verify final rootless package and unchanged core components
+        shell: bash
+        run: |
+          set -euo pipefail
           python3 - <<'PY'
           import hashlib, pathlib, subprocess, tempfile
-          target='var/jb/Library/MobileSubstrate/DynamicLibraries'
+
+          final_deb = 'dist/ChatGPTRepair_55.6_iphoneos-arm64.deb'
+          contents = subprocess.check_output(['dpkg-deb','-c',final_deb], text=True)
+          paths = [line.split(' ./',1)[1].strip() for line in contents.splitlines() if ' ./' in line]
+          bad = [p for p in paths if p not in ('','var/','var') and not p.startswith('var/')]
+          assert not bad, 'Read-only iOS system path in DEB: ' + repr(bad)
+          assert any('var/jb/usr/share/doc/chatgptrepair/' in p for p in paths), 'Missing rootless docs'
+
+          target = pathlib.Path('var/jb/Library/MobileSubstrate/DynamicLibraries')
           with tempfile.TemporaryDirectory() as d:
-              d=pathlib.Path(d)
-              for name,deb in [('repair','build-input/chatgptrepair-base.deb'),('compat','vendor/compatibility-2.3.5.deb'),('merged','dist/ChatGPTRepair_55.5_iphoneos-arm64.deb')]:
-                  out=d/name
-                  subprocess.run(['dpkg-deb','-x',deb,str(out)],check=True)
-              for stem,orig in [('ChatGPTRepair','repair'),('ChatGBeFree','compat')]:
+              d = pathlib.Path(d)
+              for name, deb in [
+                  ('repair', 'build-input/chatgptrepair-base.deb'),
+                  ('compat', 'vendor/compatibility-2.3.5.deb'),
+                  ('final', final_deb),
+              ]:
+                  out = d / name
+                  subprocess.run(['dpkg-deb','-x',deb,str(out)], check=True)
+
+              for stem, orig in [('ChatGPTRepair','repair'),('ChatGBeFree','compat')]:
                   for ext in ('dylib','plist'):
-                      filename=stem+'.'+ext
-                      source=(d/orig/target/filename).read_bytes()
-                      output=(d/'merged'/target/filename).read_bytes()
-                      assert source==output, filename+' differs in combined DEB'
-                      print(filename,'verified SHA256',hashlib.sha256(output).hexdigest())
-              assert len(list((d/'merged'/target).glob('*.dylib')))==2, 'Unexpected dylib count'
+                      filename = stem + '.' + ext
+                      source = (d / orig / target / filename).read_bytes()
+                      output = (d / 'final' / target / filename).read_bytes()
+                      assert source == output, filename + ' differs in final DEB'
+                      print(filename, 'verified SHA256', hashlib.sha256(output).hexdigest())
+
+              final_dir = d / 'final' / target
+              assert (final_dir / 'ZZChatGPTDownloadFix.dylib').is_file(), 'Missing download fix dylib'
+              assert (final_dir / 'ZZChatGPTDownloadFix.plist').is_file(), 'Missing download fix plist'
+              assert len(list(final_dir.glob('*.dylib'))) == 3, 'Unexpected dylib count'
+
+          print('Verified all', len(paths), 'archive members remain under rootless /var/jb')
+          print('Final SHA256', hashlib.sha256(pathlib.Path(final_deb).read_bytes()).hexdigest())
           PY
 
       - name: Save single installation DEB as build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ChatGPTRepair-55.5-single-DEB
-          path: dist/ChatGPTRepair_55.5_iphoneos-arm64.deb
+          name: ChatGPTRepair-55.6-single-DEB
+          path: dist/ChatGPTRepair_55.6_iphoneos-arm64.deb
           if-no-files-found: error
 
       - name: Publish ChatGPTRepair release
@@ -144,26 +199,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="v55.5"
-          artifact="dist/ChatGPTRepair_55.5_iphoneos-arm64.deb"
+          tag="v55.6"
+          artifact="dist/ChatGPTRepair_55.6_iphoneos-arm64.deb"
           cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
-          Fixes chats disappearing after opening.
+          Fixes file downloads in the iOS 16 ChatGPT app while preserving the working 55.5 chat and history fixes. Diagnostic download logging has been removed.
           NOTES
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "ChatGPTRepair v55.5" --notes-file "$RUNNER_TEMP/notes.md"
+            gh release create "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "ChatGPTRepair v55.6" --notes-file "$RUNNER_TEMP/notes.md"
           fi
 
-      - name: Verify test release and preserve working rollback
+      - name: Verify release and preserve working rollback
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          gh release view v55.5 --repo "$GITHUB_REPOSITORY" --json assets \
-            --jq '.assets[].name' | grep -Fxq "ChatGPTRepair_55.5_iphoneos-arm64.deb"
+          gh release view v55.6 --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[].name' | grep -Fxq "ChatGPTRepair_55.6_iphoneos-arm64.deb"
+          gh release view v55.5 --repo "$GITHUB_REPOSITORY" >/dev/null
           gh release view v55.4 --repo "$GITHUB_REPOSITORY" >/dev/null
           gh release view v55.3 --repo "$GITHUB_REPOSITORY" >/dev/null
           gh release view v55.2 --repo "$GITHUB_REPOSITORY" >/dev/null
