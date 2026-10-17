@@ -220,33 +220,29 @@ static void CGRetryConversationDetail(NSURLSessionConfiguration *configuration,
                                       NSUInteger attempt,
                                       void (^completion)(NSData *,NSURLResponse *,NSError *)) {
     if (!completion || !request || attempt>=2) return;
-    NSTimeInterval delay=8;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),
-                   dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
-        NSMutableURLRequest *retry=[request mutableCopy];
-        [retry setValue:[NSString stringWithFormat:@"%lu",(unsigned long)(attempt+1)]
-     forHTTPHeaderField:kDetailRetryHeader];
+    NSMutableURLRequest *retry=[request mutableCopy];
+    [retry setValue:[NSString stringWithFormat:@"%lu",(unsigned long)(attempt+1)]
+ forHTTPHeaderField:kDetailRetryHeader];
 
-        NSURLSessionConfiguration *config=[configuration copy] ?: [NSURLSessionConfiguration defaultSessionConfiguration];
-        config.timeoutIntervalForRequest=30;
-        config.timeoutIntervalForResource=120;
-        __block NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
-        [[session dataTaskWithRequest:retry completionHandler:^(NSData *data,NSURLResponse *response,NSError *error) {
-            NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
-                ?((NSHTTPURLResponse *)response).statusCode:0;
-            [session finishTasksAndInvalidate];
-            session=nil;
-            if (!error && status==429 && attempt+1<2) {
-                NSTimeInterval wait=CGDetailRetryDelay(response,attempt+1);
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(wait*NSEC_PER_SEC)),
-                               dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
-                    CGRetryConversationDetail(configuration,request,attempt+1,completion);
-                });
-                return;
-            }
-            completion(data,response,error);
-        }] resume];
-    });
+    NSURLSessionConfiguration *config=[configuration copy] ?: [NSURLSessionConfiguration defaultSessionConfiguration];
+    config.timeoutIntervalForRequest=30;
+    config.timeoutIntervalForResource=120;
+    __block NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
+    [[session dataTaskWithRequest:retry completionHandler:^(NSData *data,NSURLResponse *response,NSError *error) {
+        NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
+            ?((NSHTTPURLResponse *)response).statusCode:0;
+        [session finishTasksAndInvalidate];
+        session=nil;
+        if (!error && status==429 && attempt+1<2) {
+            NSTimeInterval wait=CGDetailRetryDelay(response,attempt+1);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(wait*NSEC_PER_SEC)),
+                           dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+                CGRetryConversationDetail(configuration,request,attempt+1,completion);
+            });
+            return;
+        }
+        completion(data,response,error);
+    }] resume];
 }
 static void CGRefreshPins(void) {
     NSURLSession *session = sMenuSession ?: sSession;
