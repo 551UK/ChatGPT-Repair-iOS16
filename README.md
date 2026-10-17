@@ -9,3 +9,5 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tw
 - Adds additional AI models and thinking options.
 - Restores voice chat features.
 - Improves copying text and compatibility with newer ChatGPT features.
+
+- Makes plain and newer rich-style links clickable on the older app.
