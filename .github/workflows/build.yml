@@ -59,10 +59,15 @@ jobs:
           PLIST
 
       - name: Download exact working v55.6 baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          curl -fL --retry 3             -o build/ChatGPTRepair_55.6_iphoneos-arm64.deb             "https://github.com/551UK/ChatGPT-Repair-iOS16/releases/download/v55.6/ChatGPTRepair_55.6_iphoneos-arm64.deb"
+          rm -rf build/original55.6
+          mkdir -p build/original55.6
+          gh run download 38991526350             --repo "$GITHUB_REPOSITORY"             --name "ChatGPTRepair-55.6-single-DEB"             --dir build/original55.6
+          cp build/original55.6/ChatGPTRepair_55.6_iphoneos-arm64.deb build/ChatGPTRepair_55.6_iphoneos-arm64.deb
           actual="$(shasum -a 256 build/ChatGPTRepair_55.6_iphoneos-arm64.deb | awk '{print $1}')"
           expected="461d57449b13b1bba10fca9ae142e185bcded16f18b2db6c6126b6dd1fcb65e6"
           test "$actual" = "$expected"
