@@ -194,6 +194,60 @@ static BOOL CGIsConversationDetail(NSURLRequest *request) {
         [parts[2] length]) return YES;
     return NO;
 }
+static NSString * const kDetailRetryHeader=@"X-551UK-Detail-Retry";
+
+static NSTimeInterval CGDetailRetryDelay(NSURLResponse *response, NSUInteger attempt) {
+    static const NSTimeInterval backoff[]={8,20};
+    NSTimeInterval delay=backoff[MIN(attempt,1)];
+    if (![response isKindOfClass:NSHTTPURLResponse.class]) return delay;
+    NSHTTPURLResponse *http=(NSHTTPURLResponse *)response;
+    NSString *value=nil;
+    for (id key in http.allHeaderFields) {
+        if ([key isKindOfClass:NSString.class] &&
+            [key caseInsensitiveCompare:@"Retry-After"]==NSOrderedSame) {
+            id raw=http.allHeaderFields[key];
+            value=[raw isKindOfClass:NSString.class]?raw:[raw description];
+            break;
+        }
+    }
+    double seconds=value.doubleValue;
+    if (seconds>0 && seconds<=90) delay=MAX(delay,seconds);
+    return delay;
+}
+
+static void CGRetryConversationDetail(NSURLSessionConfiguration *configuration,
+                                      NSURLRequest *request,
+                                      NSUInteger attempt,
+                                      void (^completion)(NSData *,NSURLResponse *,NSError *)) {
+    if (!completion || !request || attempt>=2) return;
+    NSTimeInterval delay=8;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),
+                   dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        NSMutableURLRequest *retry=[request mutableCopy];
+        [retry setValue:[NSString stringWithFormat:@"%lu",(unsigned long)(attempt+1)]
+     forHTTPHeaderField:kDetailRetryHeader];
+
+        NSURLSessionConfiguration *config=[configuration copy] ?: [NSURLSessionConfiguration defaultSessionConfiguration];
+        config.timeoutIntervalForRequest=30;
+        config.timeoutIntervalForResource=120;
+        __block NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
+        [[session dataTaskWithRequest:retry completionHandler:^(NSData *data,NSURLResponse *response,NSError *error) {
+            NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
+                ?((NSHTTPURLResponse *)response).statusCode:0;
+            [session finishTasksAndInvalidate];
+            session=nil;
+            if (!error && status==429 && attempt+1<2) {
+                NSTimeInterval wait=CGDetailRetryDelay(response,attempt+1);
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(wait*NSEC_PER_SEC)),
+                               dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+                    CGRetryConversationDetail(configuration,request,attempt+1,completion);
+                });
+                return;
+            }
+            completion(data,response,error);
+        }] resume];
+    });
+}
 static void CGRefreshPins(void) {
     NSURLSession *session = sMenuSession ?: sSession;
     NSURLRequest *request = sHistoryRequest;
@@ -253,15 +307,37 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
 @end
 @implementation NSURLSession (CGPinsHook)
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request {
-    if (CGIsConversationDetail(request)) CGOriginMergeConversationDidOpen();
+    BOOL detailRetry=[[request valueForHTTPHeaderField:kDetailRetryHeader] length]>0;
+    if (CGIsConversationDetail(request) && !detailRetry) CGOriginMergeConversationDidOpen();
     NSURLSessionDataTask *task = [self cgp_dataTaskWithRequest:request];
     CGSeeHistory(self,request);
     return task;
 }
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request
               completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completion {
-    if (CGIsConversationDetail(request)) CGOriginMergeConversationDidOpen();
+    BOOL isDetail=CGIsConversationDetail(request);
+    BOOL detailRetry=[[request valueForHTTPHeaderField:kDetailRetryHeader] length]>0;
+    if (isDetail && !detailRetry) CGOriginMergeConversationDidOpen();
     void (^forward)(NSData *,NSURLResponse *,NSError *)=completion;
+
+    if (completion && isDetail && !detailRetry) {
+        void (^originalDetailForward)(NSData *,NSURLResponse *,NSError *)=forward;
+        NSURLSessionConfiguration *detailConfig=[self.configuration copy];
+        forward=^(NSData *data,NSURLResponse *response,NSError *error) {
+            NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
+                ?((NSHTTPURLResponse *)response).statusCode:0;
+            if (!error && status==429) {
+                NSTimeInterval delay=CGDetailRetryDelay(response,0);
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),
+                               dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+                    CGRetryConversationDetail(detailConfig,request,0,originalDetailForward);
+                });
+                return;
+            }
+            originalDetailForward(data,response,error);
+        };
+    }
+
     if (completion && self!=sMenuSession && CGIsHistory(request) &&
         ![[request valueForHTTPHeaderField:@"X-551UK-History-Retry"] isEqualToString:@"1"] &&
         ![[request valueForHTTPHeaderField:@"X-551UK-History-Merge"] isEqualToString:@"1"]) {
