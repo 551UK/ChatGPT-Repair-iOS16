@@ -6,7 +6,7 @@ It is a repackaging procedure, not a source-code restoration of opaque binaries.
 
 Usage:
  python3 scripts/package_combined.py --repair path/to/v53.deb \\
-    --compat path/to/ChatGBeFree-2.3.5.deb --out ChatGPTRepair_55.5_iphoneos-arm64.deb
+    --compat path/to/ChatGBeFree-2.3.5.deb --out ChatGPTRepair_55.6_iphoneos-arm64.deb
 """
 from __future__ import annotations
 import argparse, hashlib, pathlib, shutil, subprocess, tempfile, plistlib
@@ -24,12 +24,12 @@ def main():
     ap.add_argument('--repair', required=True, type=pathlib.Path)
     ap.add_argument('--compat', required=True, type=pathlib.Path)
     ap.add_argument('--out', required=True, type=pathlib.Path)
-    ap.add_argument('--version', default='55.5')
+    ap.add_argument('--version', default='55.6')
     args = ap.parse_args()
     rv=dpkg_read(args.repair,'Version')
     cv=dpkg_read(args.compat,'Version')
-    if rv!='55.5':
-        ap.error(f'Expected ChatGPTRepair 55.5 build input; got {rv}')
+    if rv!=args.version:
+        ap.error(f'Expected ChatGPTRepair {args.version} build input; got {rv}')
     if dpkg_read(args.repair,'Package')!='com.551uk.chatgptrepair':
         ap.error('Unexpected repair package identifier')
     if cv!='2.3.5' or dpkg_read(args.compat,'Package')!='com.liam.chatgbefree':
@@ -71,8 +71,8 @@ Description: Restores missing functionality to ChatGPT.
 '''
         (meta/'control').write_text(control)
         lic=result/'var/jb/usr/share/doc/chatgptrepair';lic.mkdir(parents=True)
-        (lic/'COMPONENTS').write_text('One DEB contains two unmodified compiled components.\n' +
-          'ChatGPTRepair: user v53 source in project; compatibility: user-provided 2.3.5 prebuilt dylib.\n' +
+        (lic/'COMPONENTS').write_text('One DEB contains the two core compiled components.\n' +
+          'ChatGPTRepair: project source build; compatibility: user-provided 2.3.5 prebuilt dylib.\n' +
           'The full editable 2.3.5 source was not available: do not claim that it can be rebuilt from source.\n' +
           'The combined package title is 551UK ChatGPTRepair. Original third-party rights remain unaffected.\n' +
           'See the GNU GPLv3 licence and original source attribution where applicable.\n')
