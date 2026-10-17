@@ -11,3 +11,4 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tw
 - Improves copying text and compatibility with newer ChatGPT features.
 
 - Makes plain and newer rich-style links clickable on the older app.
+- Handles server rate limiting so history pages and conversation details do not disappear or open blank during HTTP 429 responses.
