@@ -8,13 +8,11 @@ static const void *kCGRProcessingKey = &kCGRProcessingKey;
 @interface UILabel (CGRLinkFix)
 - (void)cgr_linkfix_setText:(NSString *)text;
 - (void)cgr_linkfix_setAttributedText:(NSAttributedString *)text;
-- (void)cgr_linkfix_didMoveToWindow;
 @end
 
 @interface UITextView (CGRLinkFix)
 - (void)cgr_linkfix_setText:(NSString *)text;
 - (void)cgr_linkfix_setAttributedText:(NSAttributedString *)text;
-- (void)cgr_linkfix_didMoveToWindow;
 @end
 
 static BOOL CGRIsProcessing(id obj) {
@@ -239,10 +237,6 @@ static void CGRConfigureTextView(UITextView *textView) {
     [self cgr_linkfix_setAttributedText:text];
     CGRConfigureLabel(self);
 }
-- (void)cgr_linkfix_didMoveToWindow {
-    [self cgr_linkfix_didMoveToWindow];
-    CGRConfigureLabel(self);
-}
 @end
 
 @implementation UITextView (CGRLinkFix)
@@ -252,10 +246,6 @@ static void CGRConfigureTextView(UITextView *textView) {
 }
 - (void)cgr_linkfix_setAttributedText:(NSAttributedString *)text {
     [self cgr_linkfix_setAttributedText:text];
-    CGRConfigureTextView(self);
-}
-- (void)cgr_linkfix_didMoveToWindow {
-    [self cgr_linkfix_didMoveToWindow];
     CGRConfigureTextView(self);
 }
 @end
@@ -273,10 +263,8 @@ static void CGRLinkFixInit(void) {
 
         CGRSwizzle([UILabel class], @selector(setText:), @selector(cgr_linkfix_setText:));
         CGRSwizzle([UILabel class], @selector(setAttributedText:), @selector(cgr_linkfix_setAttributedText:));
-        CGRSwizzle([UILabel class], @selector(didMoveToWindow), @selector(cgr_linkfix_didMoveToWindow));
 
         CGRSwizzle([UITextView class], @selector(setText:), @selector(cgr_linkfix_setText:));
         CGRSwizzle([UITextView class], @selector(setAttributedText:), @selector(cgr_linkfix_setAttributedText:));
-        CGRSwizzle([UITextView class], @selector(didMoveToWindow), @selector(cgr_linkfix_didMoveToWindow));
     }
 }
