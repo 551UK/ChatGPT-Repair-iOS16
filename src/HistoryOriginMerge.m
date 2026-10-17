@@ -165,6 +165,49 @@ static NSMutableURLRequest *CGOriginRequest(NSURLRequest *original, BOOL tpp, NS
     [request setValue:@"1" forHTTPHeaderField:kMergeHeader];
     return request;
 }
+static NSString *CGOriginHeader(NSHTTPURLResponse *response, NSString *name) {
+    for (id key in response.allHeaderFields) {
+        if ([key isKindOfClass:NSString.class] &&
+            [key caseInsensitiveCompare:name]==NSOrderedSame) {
+            id value=response.allHeaderFields[key];
+            return [value isKindOfClass:NSString.class]?value:[value description];
+        }
+    }
+    return @"";
+}
+static NSTimeInterval CGOriginRetryDelay(NSURLResponse *response, NSUInteger attempt) {
+    static const NSTimeInterval backoff[]={8,20};
+    NSTimeInterval delay=backoff[MIN(attempt,1)];
+    if (![response isKindOfClass:NSHTTPURLResponse.class]) return delay;
+    NSString *value=CGOriginHeader((NSHTTPURLResponse *)response,@"Retry-After");
+    if (!value.length) return delay;
+    double seconds=value.doubleValue;
+    if (seconds>0 && seconds<=90) return MAX(delay,seconds);
+    return delay;
+}
+static void CGOriginFetchWithRetry(NSURLSession *session, NSURLRequest *request,
+                                   NSUInteger attempt, NSTimeInterval startDelay,
+                                   void (^completion)(NSData *,NSURLResponse *,NSError *)) {
+    if (!session || !request || !completion) return;
+    void (^start)(void)=^{
+        [[session dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error) {
+            NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
+                ?((NSHTTPURLResponse *)response).statusCode:0;
+            if (!error && status==429 && attempt<2) {
+                NSTimeInterval retryDelay=CGOriginRetryDelay(response,attempt);
+                CGOriginFetchWithRetry(session,request,attempt+1,retryDelay,completion);
+                return;
+            }
+            completion(data,response,error);
+        }] resume];
+    };
+    if (startDelay>0) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(startDelay*NSEC_PER_SEC)),
+                       dispatch_get_global_queue(QOS_CLASS_UTILITY,0),start);
+    } else {
+        start();
+    }
+}
 void CGOriginMergePage(NSURLSessionConfiguration *configuration, NSURLRequest *request,
                        NSData *data, NSURLResponse *response, NSError *error,
                        CGOriginMergeCompletion completion) {
@@ -200,10 +243,18 @@ void CGOriginMergePage(NSURLSessionConfiguration *configuration, NSURLRequest *r
     __block NSData *tppData=nil, *normalData=offset?nil:data;
     __block BOOL failed=NO;
     NSArray<NSURLRequest *> *requests=normal?@[tpp,normal]:@[tpp];
+    BOOL baseWasRateLimitFallback=NO;
+    if ([response isKindOfClass:NSHTTPURLResponse.class]) {
+        baseWasRateLimitFallback=[CGOriginHeader((NSHTTPURLResponse *)response,@"X-551UK-History-Cache")
+                                  isEqualToString:@"rate-limit-fallback"];
+    }
     for (NSURLRequest *extra in requests) {
         BOOL isTPP=(extra==tpp);
         dispatch_group_enter(group);
-        [[session dataTaskWithRequest:extra completionHandler:^(NSData *more, NSURLResponse *reply, NSError *networkError) {
+        // When the base page only succeeded via the local 429 fallback, do
+        // not immediately hammer the history endpoint again for TPP.
+        NSTimeInterval initialDelay=baseWasRateLimitFallback?8.0:0.0;
+        CGOriginFetchWithRetry(session,extra,0,initialDelay,^(NSData *more, NSURLResponse *reply, NSError *networkError) {
             NSInteger status=[reply isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)reply).statusCode:0;
             @synchronized(lock) {
                 if (networkError || status!=200 || !CGPageDocument(more)) failed=YES;
@@ -211,7 +262,7 @@ void CGOriginMergePage(NSURLSessionConfiguration *configuration, NSURLRequest *r
                 else normalData=more;
             }
             dispatch_group_leave(group);
-        }] resume];
+        });
     }
     dispatch_group_notify(group,dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
         NSData *merged=nil;
