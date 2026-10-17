@@ -5,6 +5,18 @@
 static const void *kCGRLinkTapKey = &kCGRLinkTapKey;
 static const void *kCGRProcessingKey = &kCGRProcessingKey;
 
+@interface UILabel (CGRLinkFix)
+- (void)cgr_linkfix_setText:(NSString *)text;
+- (void)cgr_linkfix_setAttributedText:(NSAttributedString *)text;
+- (void)cgr_linkfix_didMoveToWindow;
+@end
+
+@interface UITextView (CGRLinkFix)
+- (void)cgr_linkfix_setText:(NSString *)text;
+- (void)cgr_linkfix_setAttributedText:(NSAttributedString *)text;
+- (void)cgr_linkfix_didMoveToWindow;
+@end
+
 static BOOL CGRIsProcessing(id obj) {
     return [objc_getAssociatedObject(obj, kCGRProcessingKey) boolValue];
 }
@@ -218,12 +230,6 @@ static void CGRConfigureTextView(UITextView *textView) {
     CGRSetProcessing(textView, NO);
 }
 
-@interface UILabel (CGRLinkFix)
-- (void)cgr_linkfix_setText:(NSString *)text;
-- (void)cgr_linkfix_setAttributedText:(NSAttributedString *)text;
-- (void)cgr_linkfix_didMoveToWindow;
-@end
-
 @implementation UILabel (CGRLinkFix)
 - (void)cgr_linkfix_setText:(NSString *)text {
     [self cgr_linkfix_setText:text];
@@ -237,12 +243,6 @@ static void CGRConfigureTextView(UITextView *textView) {
     [self cgr_linkfix_didMoveToWindow];
     CGRConfigureLabel(self);
 }
-@end
-
-@interface UITextView (CGRLinkFix)
-- (void)cgr_linkfix_setText:(NSString *)text;
-- (void)cgr_linkfix_setAttributedText:(NSAttributedString *)text;
-- (void)cgr_linkfix_didMoveToWindow;
 @end
 
 @implementation UITextView (CGRLinkFix)
