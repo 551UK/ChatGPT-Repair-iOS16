@@ -41,7 +41,16 @@ assert 'NSURLErrorCancelled' in merge
 assert 'X-551UK-Detail-Retry' in pins
 assert 'CGRetryConversationDetail' in pins
 assert 'CGDetailRetryDelay' in pins
-assert 'status==429' in pins
+assert 'CGDetailRetryable(response,error)' in pins
+assert 'status==500' in pins and 'status==502' in pins and 'status==503' in pins
+assert 'NSURLErrorTimedOut' in pins
+assert 'CGDetailStillSelected' in pins
+assert 'CGScheduleDetailRetry' in pins
+assert 'MIN(attempt+1,6)' in pins
+assert 'attempt>=2' not in pins
+assert 'attempt+1<2' not in pins
+assert 'config.timeoutIntervalForRequest=30;' not in pins
+assert 'Retry-After' in pins
 assert 'originalDetailForward' in pins
 
 # Existing pin/unpin hooks, native navigation and older-page retries remain.

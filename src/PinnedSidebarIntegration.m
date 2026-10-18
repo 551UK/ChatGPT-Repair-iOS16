@@ -196,53 +196,127 @@ static BOOL CGIsConversationDetail(NSURLRequest *request) {
 }
 static NSString * const kDetailRetryHeader=@"X-551UK-Detail-Retry";
 
+// A server timeout is not an empty conversation. Keep the old app's original
+// completion pending while transient failures are retried. Authentication and
+// permanently missing conversations are not retried.
+static BOOL CGDetailRetryable(NSURLResponse *response, NSError *error) {
+    NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
+        ?((NSHTTPURLResponse *)response).statusCode:0;
+    if (status==408 || status==429 || status==500 || status==502 ||
+        status==503 || status==504 || status==520 || status==522 || status==524) return YES;
+    if (!error || ![error.domain isEqualToString:NSURLErrorDomain]) return NO;
+    switch(error.code) {
+        case NSURLErrorTimedOut:
+        case NSURLErrorNetworkConnectionLost:
+        case NSURLErrorCannotConnectToHost:
+        case NSURLErrorCannotFindHost:
+        case NSURLErrorNotConnectedToInternet:
+            return YES;
+        default: return NO;
+    }
+}
+static NSString *sSelectedDetailID;
+static NSUInteger sSelectedDetailGeneration=0;
+static NSUInteger CGDetailSelected(NSURLRequest *request) {
+    NSString *cid=request.URL.path.lastPathComponent;
+    @synchronized([NSURLSession class]) {
+        if (![sSelectedDetailID isEqualToString:cid]) {
+            sSelectedDetailID=[cid copy];
+            sSelectedDetailGeneration++;
+        }
+        return sSelectedDetailGeneration;
+    }
+}
+static BOOL CGDetailStillSelected(NSString *cid, NSUInteger generation) {
+    @synchronized([NSURLSession class]) {
+        return [sSelectedDetailID isEqualToString:cid] &&
+            sSelectedDetailGeneration==generation;
+    }
+}
+static void CGDetailFinishCancelled(void (^completion)(NSData *,NSURLResponse *,NSError *)) {
+    if (completion) completion(nil,nil,
+        [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);
+}
 static NSTimeInterval CGDetailRetryDelay(NSURLResponse *response, NSUInteger attempt) {
-    static const NSTimeInterval backoff[]={8,20};
-    NSTimeInterval delay=backoff[MIN(attempt,1)];
+    // No retry count or total-duration cutoff. Pace subsequent attempts to
+    // avoid flooding the backend, and always honor Retry-After.
+    static const NSTimeInterval backoff[]={2,5,10,20,30,45,60};
+    NSTimeInterval delay=backoff[MIN(attempt,6)];
     if (![response isKindOfClass:NSHTTPURLResponse.class]) return delay;
-    NSHTTPURLResponse *http=(NSHTTPURLResponse *)response;
     NSString *value=nil;
-    for (id key in http.allHeaderFields) {
+    for (id key in ((NSHTTPURLResponse *)response).allHeaderFields) {
         if ([key isKindOfClass:NSString.class] &&
             [key caseInsensitiveCompare:@"Retry-After"]==NSOrderedSame) {
-            id raw=http.allHeaderFields[key];
+            id raw=((NSHTTPURLResponse *)response).allHeaderFields[key];
             value=[raw isKindOfClass:NSString.class]?raw:[raw description];
             break;
         }
     }
-    double seconds=value.doubleValue;
-    if (seconds>0 && seconds<=90) delay=MAX(delay,seconds);
+    if (!value.length) return delay;
+    NSScanner *scanner=[NSScanner scannerWithString:value];
+    double seconds=0;
+    if ([scanner scanDouble:&seconds] && scanner.isAtEnd && isfinite(seconds) && seconds>=0)
+        return MAX(delay,seconds);
+    NSDateFormatter *date=[NSDateFormatter new];
+    date.locale=[NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    date.timeZone=[NSTimeZone timeZoneForSecondsFromGMT:0];
+    date.dateFormat=@"EEE, dd MMM yyyy HH:mm:ss 'GMT'";
+    NSDate *retryDate=[date dateFromString:value];
+    if (retryDate) return MAX(delay,MAX(0,[retryDate timeIntervalSinceNow]));
     return delay;
 }
-
-static void CGRetryConversationDetail(NSURLSessionConfiguration *configuration,
-                                      NSURLRequest *request,
-                                      NSUInteger attempt,
-                                      void (^completion)(NSData *,NSURLResponse *,NSError *)) {
-    if (!completion || !request || attempt>=2) return;
-    NSMutableURLRequest *retry=[request mutableCopy];
-    [retry setValue:[NSString stringWithFormat:@"%lu",(unsigned long)(attempt+1)]
- forHTTPHeaderField:kDetailRetryHeader];
-
-    NSURLSessionConfiguration *config=[configuration copy] ?: [NSURLSessionConfiguration defaultSessionConfiguration];
-    config.timeoutIntervalForRequest=30;
-    config.timeoutIntervalForResource=120;
-    __block NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
-    [[session dataTaskWithRequest:retry completionHandler:^(NSData *data,NSURLResponse *response,NSError *error) {
-        NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
-            ?((NSHTTPURLResponse *)response).statusCode:0;
-        [session finishTasksAndInvalidate];
-        session=nil;
-        if (!error && status==429 && attempt+1<2) {
-            NSTimeInterval wait=CGDetailRetryDelay(response,attempt+1);
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(wait*NSEC_PER_SEC)),
-                           dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
-                CGRetryConversationDetail(configuration,request,attempt+1,completion);
-            });
-            return;
+static void CGRetryConversationDetail(NSURLSessionConfiguration *, NSURLRequest *,
+    NSString *, NSUInteger, NSUInteger,
+    void (^)(NSData *,NSURLResponse *,NSError *));
+static void CGScheduleDetailRetry(NSURLSessionConfiguration *configuration,
+    NSURLRequest *request, NSString *cid, NSUInteger generation, NSUInteger attempt,
+    NSURLResponse *response, void (^completion)(NSData *,NSURLResponse *,NSError *)) {
+    if (!CGDetailStillSelected(cid,generation)) {
+        CGDetailFinishCancelled(completion); return;
+    }
+    NSTimeInterval delay=CGDetailRetryDelay(response,attempt);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),
+                   dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
+        if (!CGDetailStillSelected(cid,generation)) {
+            CGDetailFinishCancelled(completion); return;
         }
-        completion(data,response,error);
-    }] resume];
+        CGRetryConversationDetail(configuration,request,cid,generation,MIN(attempt+1,6),completion);
+    });
+}
+static void CGRetryConversationDetail(NSURLSessionConfiguration *configuration,
+    NSURLRequest *request, NSString *cid, NSUInteger generation, NSUInteger attempt,
+    void (^completion)(NSData *,NSURLResponse *,NSError *)) {
+    if (!CGDetailStillSelected(cid,generation)) {
+        CGDetailFinishCancelled(completion); return;
+    }
+    NSMutableURLRequest *retry=[request mutableCopy];
+    [retry setValue:@"1" forHTTPHeaderField:kDetailRetryHeader];
+    // Preserve the app's timeouts, credentials and network configuration.
+    // Each failed server request gets a new attempt, without a total retry cutoff.
+    NSURLSessionConfiguration *config=[configuration copy] ?: [NSURLSessionConfiguration defaultSessionConfiguration];
+    __block NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
+    @try {
+        NSURLSessionDataTask *task=[session dataTaskWithRequest:retry completionHandler:^(NSData *data,NSURLResponse *response,NSError *error) {
+            [session finishTasksAndInvalidate];
+            session=nil;
+            if (!CGDetailStillSelected(cid,generation)) {
+                CGDetailFinishCancelled(completion); return;
+            }
+            if (CGDetailRetryable(response,error)) {
+                CGScheduleDetailRetry(configuration,request,cid,generation,attempt,response,completion);
+                return;
+            }
+            completion(data,response,error);
+        }];
+        if (task) [task resume];
+        else {
+            [session invalidateAndCancel]; session=nil;
+            CGScheduleDetailRetry(configuration,request,cid,generation,attempt,nil,completion);
+        }
+    } @catch(__unused NSException *exception) {
+        [session invalidateAndCancel]; session=nil;
+        CGScheduleDetailRetry(configuration,request,cid,generation,attempt,nil,completion);
+    }
 }
 static void CGRefreshPins(void) {
     NSURLSession *session = sMenuSession ?: sSession;
@@ -304,7 +378,10 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
 @implementation NSURLSession (CGPinsHook)
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request {
     BOOL detailRetry=[[request valueForHTTPHeaderField:kDetailRetryHeader] length]>0;
-    if (CGIsConversationDetail(request) && !detailRetry) CGOriginMergeConversationDidOpen();
+    if (CGIsConversationDetail(request) && !detailRetry) {
+        CGDetailSelected(request);
+        CGOriginMergeConversationDidOpen();
+    }
     NSURLSessionDataTask *task = [self cgp_dataTaskWithRequest:request];
     CGSeeHistory(self,request);
     return task;
@@ -313,21 +390,25 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
               completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completion {
     BOOL isDetail=CGIsConversationDetail(request);
     BOOL detailRetry=[[request valueForHTTPHeaderField:kDetailRetryHeader] length]>0;
-    if (isDetail && !detailRetry) CGOriginMergeConversationDidOpen();
+    NSUInteger detailGeneration=0;
+    NSString *detailCID=nil;
+    if (isDetail && !detailRetry) {
+        detailCID=request.URL.lastPathComponent;
+        detailGeneration=CGDetailSelected(request);
+        CGOriginMergeConversationDidOpen();
+    }
     void (^forward)(NSData *,NSURLResponse *,NSError *)=completion;
 
     if (completion && isDetail && !detailRetry) {
         void (^originalDetailForward)(NSData *,NSURLResponse *,NSError *)=forward;
         NSURLSessionConfiguration *detailConfig=[self.configuration copy];
         forward=^(NSData *data,NSURLResponse *response,NSError *error) {
-            NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
-                ?((NSHTTPURLResponse *)response).statusCode:0;
-            if (!error && status==429) {
-                NSTimeInterval delay=CGDetailRetryDelay(response,0);
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),
-                               dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
-                    CGRetryConversationDetail(detailConfig,request,0,originalDetailForward);
-                });
+            if (!CGDetailStillSelected(detailCID,detailGeneration)) {
+                CGDetailFinishCancelled(originalDetailForward);
+                return;
+            }
+            if (CGDetailRetryable(response,error)) {
+                CGScheduleDetailRetry(detailConfig,request,detailCID,detailGeneration,0,response,originalDetailForward);
                 return;
             }
             originalDetailForward(data,response,error);
