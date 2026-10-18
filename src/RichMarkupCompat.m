@@ -80,12 +80,29 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
                    [original containsString:@"<text "] ||
                    [original containsString:@"<row>"] ||
                    [original containsString:@"<box>"];
-    BOOL hasRich=[original containsString:@"<AsyncImage "] ||
-                 [original containsString:@"<Link "] ||
-                 [original containsString:@"<Entity "];
-    if (!hasLayout || !hasRich) return original;
+    BOOL hasImage=[original containsString:@"<AsyncImage "];
+    BOOL hasStructuredLink=[original containsString:@"<Link "] &&
+                           [original containsString:@"<text "] &&
+                           [original containsString:@"<box "];
+    BOOL hasBinding=[original containsString:@"{turn"] &&
+                    [original containsString:@"product"];
+    if (!((hasLayout && (hasImage || hasStructuredLink)) || hasBinding))
+        return original;
 
     NSString *output=original;
+    // Strip Markdown code fences only around unsupported rich layout blocks.
+    // Do not touch independent code blocks in the same message.
+    output=CGRReplace(output,@"```(?:jsx|tsx|xml|html)?[ \\t]*\\n([\\s\\S]*?)\\n?```",
+                      NSRegularExpressionCaseInsensitive,
+                      ^NSString *(NSTextCheckingResult *match,NSString *text) {
+        NSString *body=CGRGroup(match,1,text);
+        if ([body containsString:@"<AsyncImage"] ||
+            [body containsString:@"<Link "] ||
+            [body containsString:@"</box"] ||
+            [body containsString:@"</row"])
+            return body;
+        return CGRGroup(match,0,text);
+    });
     // Process links before stripping their enclosing layout wrappers.
     output=CGRReplace(output,@"<Link\\b([^>]*)>(.*?)</Link>",
                       NSRegularExpressionDotMatchesLineSeparators,
