@@ -118,7 +118,28 @@ int main(void) {
         NSString *out9=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(root9))));
         NSCAssert([out9 isEqualToString:@"Example Product"],@"single product marker was not reduced to its label");
 
-        NSLog(@"PASS: web/file citations and product markers render cleanly without altering normal download links");
+
+        // Adjacent citations from the same site should not render as a row of
+        // repeated host links in the legacy app.
+        NSString *kc1=@"\uE200cite\uE202turn1search1\uE201";
+        NSString *kc2=@"\uE200cite\uE202turn1search2\uE201";
+        NSString *kc3=@"\uE200cite\uE202turn1search3\uE201";
+        NSString *kc4=@"\uE200cite\uE202turn1search4\uE201";
+        NSDictionary *root10=@{@"message":@{
+            @"content":@{@"parts":@[[NSString stringWithFormat:@"%@ %@ %@ %@",kc1,kc2,kc3,kc4]]},
+            @"metadata":@{@"content_references":@[
+                @{@"matched_text":kc1,@"safe_urls":@[@"https://www.koch-chemie.com/a"]},
+                @{@"matched_text":kc2,@"safe_urls":@[@"https://www.koch-chemie.com/b"]},
+                @{@"matched_text":kc3,@"safe_urls":@[@"https://www.koch-chemie.com/c"]},
+                @{@"matched_text":kc4,@"safe_urls":@[@"https://www.koch-chemie.com/d"]}
+            ]}
+        }};
+        NSString *out10=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(root10))));
+        NSUInteger kcCount=[[out10 componentsSeparatedByString:@"[koch-chemie.com]"] count]-1;
+        NSCAssert(kcCount==1,@"same-site citation spam was not compacted");
+        NSCAssert([out10 rangeOfString:@"\uE200cite"].location==NSNotFound,@"raw cite leaked in compacted group");
+
+        NSLog(@"PASS: citations compact cleanly, product markers render cleanly, and normal download links stay intact");
     }
     return 0;
 }

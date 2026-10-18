@@ -50,9 +50,9 @@ jobs:
             src/CitationCompat.m tests/CitationCompatTests.m \
             -o "$RUNNER_TEMP/CitationCompatTests"
           "$RUNNER_TEMP/CitationCompatTests"
-          test "$(awk '/^Version:/ { print $2; exit }' control)" = "56.3"
+          test "$(awk '/^Version:/ { print $2; exit }' control)" = "56.4"
 
-      - name: Compile v56.3 core from main source
+      - name: Compile v56.4 core from main source
         shell: bash
         run: |
           set -euo pipefail
@@ -63,7 +63,7 @@ jobs:
           debs=(packages/*.deb)
           test "${#debs[@]}" -eq 1
           test "$(dpkg-deb -f "${debs[0]}" Package)" = "com.551uk.chatgptrepair"
-          test "$(dpkg-deb -f "${debs[0]}" Version)" = "56.3"
+          test "$(dpkg-deb -f "${debs[0]}" Version)" = "56.4"
           mkdir -p build/newcore
           dpkg-deb -x "${debs[0]}" build/newcore
           test -f build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib
@@ -72,30 +72,30 @@ jobs:
           strings build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib | grep -F "X-551UK-History-Cache" >/dev/null
           strings build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib | grep -F "content_references" >/dev/null
 
-      - name: Download exact clean v56.2 baseline
+      - name: Download exact clean v56.3 baseline
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build/base-artifact
-          gh release download v56.2 \
+          gh release download v56.3 \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern "ChatGPTRepair_56.2_iphoneos-arm64.deb" \
+            --pattern "ChatGPTRepair_56.3_iphoneos-arm64.deb" \
             --dir build/base-artifact
-          cp build/base-artifact/ChatGPTRepair_56.2_iphoneos-arm64.deb build/ChatGPTRepair_56.2_iphoneos-arm64.deb
-          actual="$(shasum -a 256 build/ChatGPTRepair_56.2_iphoneos-arm64.deb | awk '{print $1}')"
-          expected="ed4fde7a29d5e2134147203bccb8f0f71423388002c8e5fbca18a18f6913d28a"
+          cp build/base-artifact/ChatGPTRepair_56.3_iphoneos-arm64.deb build/ChatGPTRepair_56.3_iphoneos-arm64.deb
+          actual="$(shasum -a 256 build/ChatGPTRepair_56.3_iphoneos-arm64.deb | awk '{print $1}')"
+          expected="8b7656c01685e2feb1ec5350dc86efa301c5ca8350f183386535a6acf9b686d7"
           test "$actual" = "$expected"
-          test "$(dpkg-deb -f build/ChatGPTRepair_56.2_iphoneos-arm64.deb Version)" = "56.2"
+          test "$(dpkg-deb -f build/ChatGPTRepair_56.3_iphoneos-arm64.deb Version)" = "56.3"
 
-      - name: Build clean v56.3 package
+      - name: Build clean v56.4 package
         shell: bash
         run: |
           set -euo pipefail
           rm -rf build/pkgroot build/basecheck build/finalcheck dist
           mkdir -p build/pkgroot build/basecheck build/finalcheck dist
-          dpkg-deb -R build/ChatGPTRepair_56.2_iphoneos-arm64.deb build/pkgroot
+          dpkg-deb -R build/ChatGPTRepair_56.3_iphoneos-arm64.deb build/pkgroot
 
           target="build/pkgroot/var/jb/Library/MobileSubstrate/DynamicLibraries"
           cp build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib "$target/ChatGPTRepair.dylib"
@@ -105,21 +105,21 @@ jobs:
           from pathlib import Path
           p=Path("build/pkgroot/DEBIAN/control")
           text=p.read_text()
-          if "Version: 56.2\n" not in text:
-              raise SystemExit("Expected v56.2 baseline")
-          p.write_text(text.replace("Version: 56.2\n","Version: 56.3\n",1))
+          if "Version: 56.3\n" not in text:
+              raise SystemExit("Expected v56.3 baseline")
+          p.write_text(text.replace("Version: 56.3\n","Version: 56.4\n",1))
           PY
 
-          dpkg-deb --root-owner-group -b build/pkgroot dist/ChatGPTRepair_56.3_iphoneos-arm64.deb
-          test "$(dpkg-deb -f dist/ChatGPTRepair_56.3_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
-          test "$(dpkg-deb -f dist/ChatGPTRepair_56.3_iphoneos-arm64.deb Version)" = "56.3"
+          dpkg-deb --root-owner-group -b build/pkgroot dist/ChatGPTRepair_56.4_iphoneos-arm64.deb
+          test "$(dpkg-deb -f dist/ChatGPTRepair_56.4_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
+          test "$(dpkg-deb -f dist/ChatGPTRepair_56.4_iphoneos-arm64.deb Version)" = "56.4"
 
       - name: Verify clean package and preserved working components
         shell: bash
         run: |
           set -euo pipefail
-          dpkg-deb -x build/ChatGPTRepair_56.2_iphoneos-arm64.deb build/basecheck
-          dpkg-deb -x dist/ChatGPTRepair_56.3_iphoneos-arm64.deb build/finalcheck
+          dpkg-deb -x build/ChatGPTRepair_56.3_iphoneos-arm64.deb build/basecheck
+          dpkg-deb -x dist/ChatGPTRepair_56.4_iphoneos-arm64.deb build/finalcheck
           base="build/basecheck/var/jb/Library/MobileSubstrate/DynamicLibraries"
           final="build/finalcheck/var/jb/Library/MobileSubstrate/DynamicLibraries"
 
@@ -147,7 +147,7 @@ jobs:
 
           python3 - <<'PY'
           import subprocess
-          deb="dist/ChatGPTRepair_56.3_iphoneos-arm64.deb"
+          deb="dist/ChatGPTRepair_56.4_iphoneos-arm64.deb"
           contents=subprocess.check_output(["dpkg-deb","-c",deb],text=True)
           paths=[line.split(" ./",1)[1].strip() for line in contents.splitlines() if " ./" in line]
           bad=[p for p in paths if p not in ("","var/","var") and not p.startswith("var/")]
@@ -156,32 +156,31 @@ jobs:
           print("Verified rootless payload paths:",len(paths))
           PY
 
-          shasum -a 256 dist/ChatGPTRepair_56.3_iphoneos-arm64.deb
+          shasum -a 256 dist/ChatGPTRepair_56.4_iphoneos-arm64.deb
 
-      - name: Upload clean v56.3 DEB artifact
+      - name: Upload clean v56.4 DEB artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ChatGPTRepair-56.3-clean
-          path: dist/ChatGPTRepair_56.3_iphoneos-arm64.deb
+          name: ChatGPTRepair-56.4-clean
+          path: dist/ChatGPTRepair_56.4_iphoneos-arm64.deb
           if-no-files-found: error
 
-      - name: Publish ChatGPTRepair v56.3
+      - name: Publish ChatGPTRepair v56.4
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          tag="v56.3"
-          artifact="dist/ChatGPTRepair_56.3_iphoneos-arm64.deb"
+          tag="v56.4"
+          artifact="dist/ChatGPTRepair_56.4_iphoneos-arm64.deb"
           cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
-          Adds legacy-app handling for modern product and products rich-content markers.
+          Compacts repeated same-site citation links in the legacy iOS renderer.
 
-          - Converts products carousel markers into the product names carried in the selections JSON.
-          - Converts singular product markers into their human-facing product name.
-          - Removes raw turn...product IDs and private-use framing instead of showing broken emoji-like characters.
+          - Adjacent citation links that resolve to the same host are collapsed to one host link instead of repeated [site] labels.
+          - Keeps distinct-site citations separate.
           - Keeps normal URL/download labels untouched.
-          - Preserves web/file citation compatibility, the blank-chat retry fix, history, pin/unpin, downloads and compatibility components.
+          - Preserves v56.3 product/products cleanup, web/file citation compatibility, blank-chat retries, history, pin/unpin, downloads and compatibility components.
           - The separate blank-chat diagnostic tweak remains independent and is not bundled.
           NOTES
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -190,7 +189,7 @@ jobs:
             gh release create "$tag" "$artifact" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "ChatGPTRepair v56.3" \
+              --title "ChatGPTRepair v56.4" \
               --notes-file "$RUNNER_TEMP/notes.md"
           fi
 
@@ -201,6 +200,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release view v56.3 --repo "$GITHUB_REPOSITORY" --json assets \
-            --jq '.assets[].name' | grep -Fxq "ChatGPTRepair_56.3_iphoneos-arm64.deb"
-          gh release view v56.2 --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release view v56.4 --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[].name' | grep -Fxq "ChatGPTRepair_56.4_iphoneos-arm64.deb"
+          gh release view v56.3 --repo "$GITHUB_REPOSITORY" >/dev/null

@@ -133,6 +133,53 @@ static NSString *CGRRichLinkToken(NSURL *url) {
     return [NSString stringWithFormat:@"\uE200url\uE202%@\uE202%@\uE201",label,url.absoluteString];
 }
 
+
+static BOOL CGRCollapseAdjacentDuplicateCitationLinks(NSMutableString *text) {
+    static NSRegularExpression *regex;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString *pattern=@"\uE200url\uE202(\\[[^\uE202\uE201]+\\])\uE202(https?://[^\uE201]+)\uE201";
+        regex=[NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];
+    });
+    NSArray<NSTextCheckingResult *> *matches=
+        [regex matchesInString:text options:0 range:NSMakeRange(0,text.length)];
+    if (matches.count<2) return NO;
+
+    BOOL changed=NO;
+    NSCharacterSet *ws=[NSCharacterSet whitespaceAndNewlineCharacterSet];
+    for (NSInteger i=(NSInteger)matches.count-1;i>0;i--) {
+        NSTextCheckingResult *previous=matches[(NSUInteger)i-1];
+        NSTextCheckingResult *current=matches[(NSUInteger)i];
+        NSRange prevLabelRange=[previous rangeAtIndex:1];
+        NSRange curLabelRange=[current rangeAtIndex:1];
+        NSRange prevURLRange=[previous rangeAtIndex:2];
+        NSRange curURLRange=[current rangeAtIndex:2];
+        if (prevLabelRange.location==NSNotFound || curLabelRange.location==NSNotFound ||
+            prevURLRange.location==NSNotFound || curURLRange.location==NSNotFound) continue;
+
+        NSString *prevLabel=[text substringWithRange:prevLabelRange];
+        NSString *curLabel=[text substringWithRange:curLabelRange];
+        if (![prevLabel isEqualToString:curLabel]) continue;
+
+        NSURL *prevURL=[NSURL URLWithString:[text substringWithRange:prevURLRange]];
+        NSURL *curURL=[NSURL URLWithString:[text substringWithRange:curURLRange]];
+        if (!prevURL || !curURL) continue;
+        NSString *expected=[NSString stringWithFormat:@"[%@]",CGRSafeLabelForURL(prevURL)];
+        if (![prevLabel isEqualToString:expected] ||
+            ![CGRSafeLabelForURL(prevURL) isEqualToString:CGRSafeLabelForURL(curURL)]) continue;
+
+        NSUInteger gapStart=NSMaxRange(previous.range);
+        if (current.range.location<gapStart) continue;
+        NSRange gap=NSMakeRange(gapStart,current.range.location-gapStart);
+        NSString *between=[text substringWithRange:gap];
+        if ([[between stringByTrimmingCharactersInSet:ws] length]) continue;
+
+        [text deleteCharactersInRange:NSMakeRange(gapStart,NSMaxRange(current.range)-gapStart)];
+        changed=YES;
+    }
+    return changed;
+}
+
 static BOOL CGRRewriteMessage(NSMutableDictionary *message) {
     NSMutableDictionary *content=[message[@"content"] isKindOfClass:NSDictionary.class]
         ?[message[@"content"] mutableCopy]:nil;
@@ -185,6 +232,7 @@ static BOOL CGRRewriteMessage(NSMutableDictionary *message) {
         // raw selections JSON and turn...product IDs.
         CGRReplaceProductMarkers(text,@"products");
         CGRReplaceProductMarkers(text,@"product");
+        CGRCollapseAdjacentDuplicateCitationLinks(text);
 
         if (![text isEqualToString:original]) {
             newParts[p]=text;

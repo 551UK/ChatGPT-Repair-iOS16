@@ -22,3 +22,5 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tw
 - v56.2 handles filecite markers cleanly, using resolved links when available or a [file] fallback without exposing raw turn IDs.
 
 - v56.3 converts unsupported product/products rich markers into readable product names without exposing raw product reference IDs.
+
+- v56.4 compacts adjacent same-site citation links so repeated source hosts do not spam the old renderer.
