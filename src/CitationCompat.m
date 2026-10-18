@@ -31,6 +31,58 @@ static BOOL CGRReplaceUnresolvedMarker(NSMutableString *text,
     return changed;
 }
 
+
+static NSString *CGRProductLabelFromSelection(id selection) {
+    if (![selection isKindOfClass:NSArray.class]) return nil;
+    NSArray *array=selection;
+    if (array.count<2 || ![array[1] isKindOfClass:NSString.class]) return nil;
+    NSString *label=[array[1] stringByTrimmingCharactersInSet:
+        [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return label.length?label:nil;
+}
+
+static NSString *CGRProductReplacement(NSString *kind, NSString *payload) {
+    NSData *jsonData=[payload dataUsingEncoding:NSUTF8StringEncoding];
+    if (!jsonData.length) return [kind isEqualToString:@"products"]?@"[products]":@"[product]";
+    id json=[NSJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL];
+
+    if ([kind isEqualToString:@"products"]) {
+        NSArray *selections=[json isKindOfClass:NSDictionary.class] &&
+            [json[@"selections"] isKindOfClass:NSArray.class] ? json[@"selections"] : nil;
+        NSMutableArray<NSString *> *labels=[NSMutableArray array];
+        for (id selection in selections) {
+            NSString *label=CGRProductLabelFromSelection(selection);
+            if (label.length && ![labels containsObject:label]) [labels addObject:label];
+        }
+        if (labels.count) return [labels componentsJoinedByString:@" • "];
+        return @"[products]";
+    }
+
+    NSString *single=CGRProductLabelFromSelection(json);
+    return single.length?single:@"[product]";
+}
+
+static BOOL CGRReplaceProductMarkers(NSMutableString *text, NSString *kind) {
+    NSString *prefix=[NSString stringWithFormat:@"\uE200%@\uE202",kind];
+    BOOL changed=NO;
+    while (YES) {
+        NSRange start=[text rangeOfString:prefix];
+        if (start.location==NSNotFound) break;
+        NSUInteger payloadStart=NSMaxRange(start);
+        if (payloadStart>=text.length) break;
+        NSRange end=[text rangeOfString:@"\uE201" options:0
+                                 range:NSMakeRange(payloadStart,text.length-payloadStart)];
+        if (end.location==NSNotFound) break;
+        NSString *payload=[text substringWithRange:
+            NSMakeRange(payloadStart,end.location-payloadStart)];
+        NSString *replacement=CGRProductReplacement(kind,payload);
+        NSRange whole=NSMakeRange(start.location,NSMaxRange(end)-start.location);
+        [text replaceCharactersInRange:whole withString:replacement];
+        changed=YES;
+    }
+    return changed;
+}
+
 static NSString *CGRSafeLabelForURL(NSURL *url) {
     NSString *host=url.host.lowercaseString ?: @"";
     if ([host hasPrefix:@"www."]) host=[host substringFromIndex:4];
@@ -128,6 +180,12 @@ static BOOL CGRRewriteMessage(NSMutableDictionary *message) {
         // their original labels byte-for-byte.
         CGRReplaceUnresolvedMarker(text,@"\uE200cite\uE202",@"[source]");
 
+        // Modern product cards are not understood by the 2024 renderer.
+        // Preserve their human-facing product names instead of exposing the
+        // raw selections JSON and turn...product IDs.
+        CGRReplaceProductMarkers(text,@"products");
+        CGRReplaceProductMarkers(text,@"product");
+
         if (![text isEqualToString:original]) {
             newParts[p]=text;
             changed=YES;
@@ -157,17 +215,20 @@ NSData *CGRCitationCompatRewriteJSONData(NSData *data) {
     static NSData *referencesNeedle;
     static NSData *fileciteNeedle;
     static NSData *citeNeedle;
+    static NSData *productNeedle;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         referencesNeedle=[@"content_references" dataUsingEncoding:NSUTF8StringEncoding];
         fileciteNeedle=[@"filecite" dataUsingEncoding:NSUTF8StringEncoding];
         citeNeedle=[@"cite" dataUsingEncoding:NSUTF8StringEncoding];
+        productNeedle=[@"product" dataUsingEncoding:NSUTF8StringEncoding];
     });
     NSRange whole=NSMakeRange(0,data.length);
     BOOL maybeReferences=[data rangeOfData:referencesNeedle options:0 range:whole].location!=NSNotFound;
     BOOL maybeFilecite=[data rangeOfData:fileciteNeedle options:0 range:whole].location!=NSNotFound;
     BOOL maybeCite=[data rangeOfData: citeNeedle options:0 range:whole].location!=NSNotFound;
-    if (!maybeReferences && !maybeFilecite && !maybeCite) return data;
+    BOOL maybeProduct=[data rangeOfData:productNeedle options:0 range:whole].location!=NSNotFound;
+    if (!maybeReferences && !maybeFilecite && !maybeCite && !maybeProduct) return data;
 
     NSError *error=nil;
     id root=[NSJSONSerialization JSONObjectWithData:data

@@ -97,7 +97,28 @@ int main(void) {
         NSCAssert([out7 containsString:@"https://files.example.test/document"],@"filecite URL was not preserved");
         NSCAssert([out7 rangeOfString:@"\uE200filecite"].location==NSNotFound,@"resolved filecite marker leaked");
 
-        NSLog(@"PASS: web/file citations render cleanly without altering normal download links");
+
+        // Modern shopping UI markers must degrade to readable product names.
+        NSString *products=@"\uE200products\uE202{\"selections\":[[\"turn378126product0\",\"Koch Chemie Top Star\"],[\"turn479938product4\",\"Poorboy's Natural Look\"]]}\uE201";
+        NSDictionary *root8=@{@"message":@{
+            @"content":@{@"parts":@[[@"Pick: " stringByAppendingString:products]]},
+            @"metadata":@{}
+        }};
+        NSString *out8=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(root8))));
+        NSCAssert([out8 rangeOfString:@"\uE200products"].location==NSNotFound,@"raw products marker leaked");
+        NSCAssert([out8 containsString:@"Koch Chemie Top Star"],@"first product name lost");
+        NSCAssert([out8 containsString:@"Poorboy's Natural Look"],@"second product name lost");
+        NSCAssert([out8 rangeOfString:@"turn378126product0"].location==NSNotFound,@"product ref ID leaked");
+
+        NSString *product=@"\uE200product\uE202[\"turn0product1\",\"Example Product\",{\"render_as\":\"hero\"}]\uE201";
+        NSDictionary *root9=@{@"message":@{
+            @"content":@{@"parts":@[product]},
+            @"metadata":@{}
+        }};
+        NSString *out9=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(root9))));
+        NSCAssert([out9 isEqualToString:@"Example Product"],@"single product marker was not reduced to its label");
+
+        NSLog(@"PASS: web/file citations and product markers render cleanly without altering normal download links");
     }
     return 0;
 }
