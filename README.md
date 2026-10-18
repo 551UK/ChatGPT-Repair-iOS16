@@ -18,3 +18,5 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tw
 - Restores modern web citations in the legacy app by converting citation metadata into tappable source links.
 
 - v56.1 preserves the original labels of normal rich/download links while converting only genuine citation markers.
+
+- v56.2 handles filecite markers cleanly, using resolved links when available or a [file] fallback without exposing raw turn IDs.

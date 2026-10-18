@@ -4,7 +4,31 @@ static BOOL CGRIsCitationMarker(NSString *text) {
     // Only rewrite actual citation tokens. Normal rich URL tokens use the same
     // private-use framing and must be left untouched so LinkFix can preserve
     // their original user-facing label (for example "Download ... (.deb)").
-    return [text hasPrefix:@"\uE200cite\uE202"];
+    return [text hasPrefix:@"\uE200cite\uE202"] ||
+           [text hasPrefix:@"\uE200filecite\uE202"];
+}
+
+static NSString *CGRFallbackForCitationMarker(NSString *text) {
+    return [text hasPrefix:@"\uE200filecite\uE202"] ? @"[file]" : @"[source]";
+}
+
+static BOOL CGRReplaceUnresolvedMarker(NSMutableString *text,
+                                       NSString *prefix,
+                                       NSString *fallback) {
+    BOOL changed=NO;
+    while (YES) {
+        NSRange start=[text rangeOfString:prefix];
+        if (start.location==NSNotFound) break;
+        NSUInteger after=NSMaxRange(start);
+        if (after>=text.length) break;
+        NSRange end=[text rangeOfString:@"\uE201" options:0
+                                 range:NSMakeRange(after,text.length-after)];
+        if (end.location==NSNotFound) break;
+        NSRange whole=NSMakeRange(start.location,NSMaxRange(end)-start.location);
+        [text replaceCharactersInRange:whole withString:fallback];
+        changed=YES;
+    }
+    return changed;
 }
 
 static NSString *CGRSafeLabelForURL(NSURL *url) {
@@ -65,7 +89,7 @@ static BOOL CGRRewriteMessage(NSMutableDictionary *message) {
     NSArray *references=[metadata[@"content_references"] isKindOfClass:NSArray.class]
         ?metadata[@"content_references"]:nil;
     NSArray *parts=[content[@"parts"] isKindOfClass:NSArray.class]?content[@"parts"]:nil;
-    if (!content || !references.count || !parts.count) return NO;
+    if (!content || !parts.count) return NO;
 
     NSMutableArray *newParts=[parts mutableCopy];
     BOOL changed=NO;
@@ -91,11 +115,19 @@ static BOOL CGRRewriteMessage(NSMutableDictionary *message) {
                 for (NSURL *url in urls) [tokens addObject:CGRRichLinkToken(url)];
                 replacement=[tokens componentsJoinedByString:@" "];
             } else {
-                replacement=@"[source]";
+                replacement=CGRFallbackForCitationMarker(matched);
             }
             [text replaceOccurrencesOfString:matched withString:replacement
                                     options:0 range:NSMakeRange(0,text.length)];
         }
+        // File citations can arrive without a content_references record.
+        // Never let the old app expose the raw private-use framing/turn ID.
+        CGRReplaceUnresolvedMarker(text,@"\uE200filecite\uE202",@"[file]");
+        // Apply the same clean fallback to any unresolved web cite token. This
+        // deliberately does not match \uE200url, so normal/download links keep
+        // their original labels byte-for-byte.
+        CGRReplaceUnresolvedMarker(text,@"\uE200cite\uE202",@"[source]");
+
         if (![text isEqualToString:original]) {
             newParts[p]=text;
             changed=YES;
@@ -122,13 +154,20 @@ static BOOL CGRRewriteObject(id object) {
 
 NSData *CGRCitationCompatRewriteJSONData(NSData *data) {
     if (!data.length) return data;
-    static NSData *needle;
+    static NSData *referencesNeedle;
+    static NSData *fileciteNeedle;
+    static NSData *citeNeedle;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        needle=[@"content_references" dataUsingEncoding:NSUTF8StringEncoding];
+        referencesNeedle=[@"content_references" dataUsingEncoding:NSUTF8StringEncoding];
+        fileciteNeedle=[@"filecite" dataUsingEncoding:NSUTF8StringEncoding];
+        citeNeedle=[@"cite" dataUsingEncoding:NSUTF8StringEncoding];
     });
-    if ([data rangeOfData:needle options:0 range:NSMakeRange(0,data.length)].location==NSNotFound)
-        return data;
+    NSRange whole=NSMakeRange(0,data.length);
+    BOOL maybeReferences=[data rangeOfData:referencesNeedle options:0 range:whole].location!=NSNotFound;
+    BOOL maybeFilecite=[data rangeOfData:fileciteNeedle options:0 range:whole].location!=NSNotFound;
+    BOOL maybeCite=[data rangeOfData: citeNeedle options:0 range:whole].location!=NSNotFound;
+    if (!maybeReferences && !maybeFilecite && !maybeCite) return data;
 
     NSError *error=nil;
     id root=[NSJSONSerialization JSONObjectWithData:data

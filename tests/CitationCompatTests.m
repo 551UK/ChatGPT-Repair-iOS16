@@ -73,7 +73,31 @@ int main(void) {
         NSCAssert([out5 isEqualToString:download],@"normal rich/download link label was modified");
         NSCAssert([out5 containsString:@"Download ChatGPTRepair v56.0 (.deb)"],@"download label was lost");
 
-        NSLog(@"PASS: modern citation markers convert to old-app rich links without altering normal download links");
+
+        // File citations use a different marker family from web citations.
+        // They must never leak raw private-use characters/turn IDs in the old app.
+        NSString *filecite=@"\uE200filecite\uE202turn20file0\uE201";
+        NSDictionary *root6=@{@"message":@{
+            @"content":@{@"parts":@[[@"See " stringByAppendingFormat:@"%@ here",filecite]]},
+            @"metadata":@{}
+        }};
+        NSString *out6=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(root6))));
+        NSCAssert([out6 rangeOfString:@"\uE200filecite"].location==NSNotFound,@"raw filecite leaked");
+        NSCAssert([out6 containsString:@"See [file] here"],@"filecite without metadata was not cleaned");
+
+        NSString *fileciteURL=@"\uE200filecite\uE202turn21file3\uE202L10-L20\uE201";
+        NSDictionary *root7=@{@"message":@{
+            @"content":@{@"parts":@[fileciteURL]},
+            @"metadata":@{@"content_references":@[@{
+                @"matched_text":fileciteURL,
+                @"safe_urls":@[@"https://files.example.test/document"]
+            }]}
+        }};
+        NSString *out7=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(root7))));
+        NSCAssert([out7 containsString:@"https://files.example.test/document"],@"filecite URL was not preserved");
+        NSCAssert([out7 rangeOfString:@"\uE200filecite"].location==NSNotFound,@"resolved filecite marker leaked");
+
+        NSLog(@"PASS: web/file citations render cleanly without altering normal download links");
     }
     return 0;
 }
