@@ -44,6 +44,7 @@ jobs:
           set -euo pipefail
           python3 tests/check_clean_release.py
           python3 tests/check_history_refresh.py
+          python3 tests/check_sidebar_restore.py
           clang -fobjc-arc -fblocks -framework Foundation \
             src/HistoryOriginMerge.m tests/HistoryOriginMergeTests.m \
             -o "$RUNNER_TEMP/HistoryOriginMergeTests"
