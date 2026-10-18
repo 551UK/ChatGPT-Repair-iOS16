@@ -49,7 +49,9 @@ assert 'CGScheduleDetailRetry' in pins
 assert 'MIN(attempt+1,6)' in pins
 assert 'attempt>=2' not in pins
 assert 'attempt+1<2' not in pins
-assert 'config.timeoutIntervalForRequest=30;' not in pins
+detail=pins.split('static NSString * const kDetailRetryHeader=',1)[1].split('static void CGRefreshPins(void)',1)[0]
+assert 'timeoutIntervalForRequest=30' not in detail
+assert 'timeoutIntervalForResource=120' not in detail
 assert 'Retry-After' in pins
 assert 'originalDetailForward' in pins
 

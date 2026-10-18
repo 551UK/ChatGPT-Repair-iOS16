@@ -14,6 +14,7 @@ extern void CGRCompatibilityEnsureLoaded(void);
 #import <mach-o/loader.h>
 #import <dlfcn.h>
 #import <string.h>
+#include <math.h>
 #import "PinService.h"
 #import "HistoryPageCache.h"
 #import "HistoryOriginMerge.h"
