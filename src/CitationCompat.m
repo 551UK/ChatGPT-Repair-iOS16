@@ -1,11 +1,10 @@
 #import "CitationCompat.h"
 
-static BOOL CGRContainsPrivateCitationMarker(NSString *text) {
-    for (NSUInteger i=0;i<text.length;i++) {
-        unichar c=[text characterAtIndex:i];
-        if (c>=0xE200 && c<=0xE203) return YES;
-    }
-    return NO;
+static BOOL CGRIsCitationMarker(NSString *text) {
+    // Only rewrite actual citation tokens. Normal rich URL tokens use the same
+    // private-use framing and must be left untouched so LinkFix can preserve
+    // their original user-facing label (for example "Download ... (.deb)").
+    return [text hasPrefix:@"\uE200cite\uE202"];
 }
 
 static NSString *CGRSafeLabelForURL(NSURL *url) {
@@ -82,7 +81,7 @@ static BOOL CGRRewriteMessage(NSMutableDictionary *message) {
                 ?reference[@"matched_text"]:nil;
             // Some source-footnote records use ordinary whitespace for
             // matched_text. Never perform a global replacement on those.
-            if (!matched.length || !CGRContainsPrivateCitationMarker(matched)) continue;
+            if (!matched.length || !CGRIsCitationMarker(matched)) continue;
             if ([text rangeOfString:matched].location==NSNotFound) continue;
 
             NSArray<NSURL *> *urls=CGRURLsForReference(reference);

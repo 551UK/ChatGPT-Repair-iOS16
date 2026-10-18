@@ -57,7 +57,23 @@ int main(void) {
         NSString *out4=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(root4))));
         NSCAssert([out4 isEqualToString:@"a b"],@"ordinary matched_text was incorrectly replaced");
 
-        NSLog(@"PASS: modern citation markers convert to old-app rich links");
+
+        // Regression: normal rich URL markers are already supported by LinkFix
+        // and must retain their custom label. v56.0 accidentally replaced them
+        // with a host-only [github.com] citation label.
+        NSString *download=@"\uE200url\uE202Download ChatGPTRepair v56.0 (.deb)\uE202https://github.com/551UK/ChatGPT-Repair-iOS16/releases/download/v56.0/ChatGPTRepair_56.0_iphoneos-arm64.deb\uE201";
+        NSDictionary *root5=@{@"message":@{
+            @"content":@{@"parts":@[download]},
+            @"metadata":@{@"content_references":@[@{
+                @"matched_text":download,
+                @"safe_urls":@[@"https://github.com/551UK/ChatGPT-Repair-iOS16/releases/download/v56.0/ChatGPTRepair_56.0_iphoneos-arm64.deb"]
+            }]}
+        }};
+        NSString *out5=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(root5))));
+        NSCAssert([out5 isEqualToString:download],@"normal rich/download link label was modified");
+        NSCAssert([out5 containsString:@"Download ChatGPTRepair v56.0 (.deb)"],@"download label was lost");
+
+        NSLog(@"PASS: modern citation markers convert to old-app rich links without altering normal download links");
     }
     return 0;
 }
