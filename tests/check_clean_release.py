@@ -1,12 +1,15 @@
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
-main=["CompatibilityBoot.m","HistoryIsolation.m","HistoryPageCache.m","PinnedSidebarIntegration.m","DirectPinSelection.m","DownloadFix.m","LinkFix.m"]
+main=["CompatibilityBoot.m","CitationCompat.m","HistoryIsolation.m","HistoryPageCache.m","PinnedSidebarIntegration.m","DirectPinSelection.m","DownloadFix.m","LinkFix.m"]
 for file in main:
     content=(root/"src"/file).read_text()
     assert "ChatGPT551Repair.log" not in content, file
     assert "ChatGPTRepair-Compatibility-v055.log" not in content, file
     for marker in ("CGRLog(", "CGPLog(", "CGCacheLog(", "CG46Log(", "CGRHistoryTaskObserver", "CGRInstallHistoryInterceptorProbe"):
         assert marker not in content, (file,marker)
+assert "CGRCitationCompatRewriteJSONData" in (root/"src/CitationCompat.m").read_text()
+assert "content_references" in (root/"src/CitationCompat.m").read_text()
+assert "\\uE200url\\uE202" in (root/"src/CitationCompat.m").read_text()
 assert "CGHistoryPageResult" in (root/"src/HistoryPageCache.m").read_text()
 assert "(offset!=0 && offset<20)" in (root/"src/HistoryPageCache.m").read_text()
 assert "CGSetPin(" in (root/"src/PinnedSidebarIntegration.m").read_text()

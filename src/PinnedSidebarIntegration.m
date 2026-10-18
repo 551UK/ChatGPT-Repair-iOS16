@@ -18,6 +18,7 @@ extern void CGRCompatibilityEnsureLoaded(void);
 #import "PinService.h"
 #import "HistoryPageCache.h"
 #import "HistoryOriginMerge.h"
+#import "CitationCompat.h"
 #import "PinnedSectionStore.h"
 #import "PinnedSidebarView.h"
 #import "PinnedLayoutShim.h"
@@ -430,6 +431,15 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
                             originalForward(combined,combinedResponse,combinedError);
                         });
                 });
+        };
+    }
+    // Resolve modern web citation markers before the 2024 app renders them.
+    // This is deliberately the outermost wrapper so it applies to normal
+    // conversation loads, retry loads, and any other completion-based JSON.
+    if (forward) {
+        void (^citationForward)(NSData *,NSURLResponse *,NSError *)=forward;
+        forward=^(NSData *data,NSURLResponse *response,NSError *error) {
+            citationForward(CGRCitationCompatRewriteJSONData(data),response,error);
         };
     }
     NSURLSessionDataTask *task = [self cgp_dataTaskWithRequest:request completionHandler:forward];

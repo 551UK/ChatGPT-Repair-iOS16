@@ -14,3 +14,5 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tw
 - Handles server rate limiting so history pages and conversation details do not disappear or open blank during HTTP 429 responses.
 
 - Retries transient chat-opening timeouts (including HTTP 500) without a fixed attempt count; waits according to server Retry-After and cancels obsolete retries after selecting another chat.
+
+- Restores modern web citations in the legacy app by converting citation metadata into tappable source links.
