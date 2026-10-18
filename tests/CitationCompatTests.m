@@ -139,6 +139,48 @@ int main(void) {
         NSCAssert(kcCount==1,@"same-site citation spam was not compacted");
         NSCAssert([out10 rangeOfString:@"\uE200cite"].location==NSNotFound,@"raw cite leaked in compacted group");
 
+
+        // Real-world modern DIL fallback (October 2026 older-app regression).
+        // Neither raw JSX tags nor unresolved server-side product bindings may
+        // reach the old renderer, but the direct retailer URL must survive.
+        NSString *dil=@"One important point:\n"
+            "<row align=\"start\" gap={3}>\n"
+            "<AsyncImage query=\"Loctite 480 black rubber toughened instant adhesive 20g\" aspectRatio=\"3:4\" maxWidth=\"112px\"/>\n"
+            "<box flex=\"1\" gap={1}>\n"
+            "**Loctite 480 – 20g**\n\n"
+            "£26.38 at MSC Industrial\n"
+            "<text size=\"sm\"><Link url=\"https://www.mscdirect.co.uk/loctite-20g-480-black-toughened-instant-adhesive-lct-48020d\" title=\"Buy in the UK\"/></text>\n"
+            "</box>\n</row>\n"
+            "There is also a cheaper alternative, listed for {turn243296product15.displayed_price}.";
+        NSDictionary *richRoot=@{@"message":@{
+            @"content":@{@"parts":@[dil]},@"metadata":@{}
+        }};
+        NSString *rich=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(richRoot))));
+        NSCAssert(![rich containsString:@"<row"],@"raw layout tag leaked");
+        NSCAssert(![rich containsString:@"<box"],@"raw box tag leaked");
+        NSCAssert(![rich containsString:@"<AsyncImage"],@"raw image tag leaked");
+        NSCAssert(![rich containsString:@"<Link"],@"raw rich link tag leaked");
+        NSCAssert(![rich containsString:@"{turn243296product15"],@"unresolved price binding leaked");
+        NSCAssert([rich containsString:@"[price unavailable]"],@"missing fallback price");
+        NSCAssert([rich containsString:@"Loctite 480 – 20g"],@"product name lost");
+        NSCAssert([rich containsString:@"£26.38 at MSC Industrial"],@"real displayed price lost");
+        NSCAssert([rich containsString:@"\uE200url\uE202Buy in the UK\uE202https://www.mscdirect.co.uk/"],@"retailer link lost");
+
+        // Don't transform ordinary examples of XML / UI code.
+        NSString *example=@"Here is code: <row align=\"start\"><Link url=\"https://example.com\"/></row>";
+        NSDictionary *noRewrite=@{@"message":@{
+            @"content":@{@"parts":@[example]},@"metadata":@{}
+        }};
+        NSString *unchanged=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(noRewrite))));
+        NSCAssert([unchanged isEqualToString:example],@"ordinary code example was changed");
+
+        NSString *onlyBinding=@"An alternative costs {turn120product5.displayed_price}.";
+        NSDictionary *bindingRoot=@{@"message":@{
+            @"content":@{@"parts":@[onlyBinding]},@"metadata":@{}
+        }};
+        NSString *bound=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(bindingRoot))));
+        NSCAssert([bound containsString:@"[price unavailable]"],@"standalone binding leaked");
+
         NSLog(@"PASS: citations compact cleanly, product markers render cleanly, and normal download links stay intact");
     }
     return 0;

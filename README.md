@@ -24,3 +24,5 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tw
 - v56.3 converts unsupported product/products rich markers into readable product names without exposing raw product reference IDs.
 
 - v56.4 compacts adjacent same-site citation links so repeated source hosts do not spam the old renderer.
+
+- v56.5 converts unsupported rich layout markup (`<row>`, `<AsyncImage>`, `<Link>` and product price placeholders) into readable text with tappable URL tokens for older iOS clients. This does not add native rich cards or image query support.
