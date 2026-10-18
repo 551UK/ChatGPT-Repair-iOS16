@@ -26,3 +26,5 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tw
 - v56.4 compacts adjacent same-site citation links so repeated source hosts do not spam the old renderer.
 
 - v56.5 converts unsupported rich layout markup (`<row>`, `<AsyncImage>`, `<Link>` and product price placeholders) into readable text with tappable URL tokens for older iOS clients. This does not add native rich cards or image query support.
+
+- v56.6 (test): when leaving the history sidebar and returning to the same conversation without a native detail request, reselect that conversation using the existing guarded native selection bridge. Skips restores when another chat begins loading; leaves retry/download handling unchanged.

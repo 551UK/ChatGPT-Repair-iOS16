@@ -32,6 +32,7 @@ static NSTimeInterval sLastRefresh = 0;
 static BOOL sNativeHookInstalled = NO;
 static IMP sOriginalLayout = NULL;
 static IMP sOriginalAppear = NULL;
+static IMP sOriginalDisappear = NULL;
 static IMP sOriginalScroll = NULL;
 static char kPinView, kPinAnchor, kRenderedPinSet;
 static NSString * const kUpdated = @"com.551uk.pins.updated";
@@ -219,9 +220,17 @@ static BOOL CGDetailRetryable(NSURLResponse *response, NSError *error) {
 }
 static NSString *sSelectedDetailID;
 static NSUInteger sSelectedDetailGeneration=0;
+static NSUInteger sDetailRequestSerial=0;
+static NSString *sSidebarEntryConversationID;
+static NSUInteger sSidebarEntryDetailSerial=0;
+static NSUInteger sSidebarEpoch=0;
+static BOOL sSidebarWasShown=NO;
+static NSTimeInterval sSidebarLastRestoreAt=0;
 static NSUInteger CGDetailSelected(NSURLRequest *request) {
     NSString *cid=request.URL.path.lastPathComponent;
     @synchronized([NSURLSession class]) {
+        // Distinguish a native request for the same chat from a no-op sidebar return.
+        sDetailRequestSerial++;
         if (![sSelectedDetailID isEqualToString:cid]) {
             sSelectedDetailID=[cid copy];
             sSelectedDetailGeneration++;
@@ -699,8 +708,53 @@ static void CGHistoryScroll(id self, SEL command, UIScrollView *scroll) {
 }
 static void CGHistoryAppear(id self, SEL command, BOOL animated) {
     ((void(*)(id, SEL, BOOL))sOriginalAppear)(self,command,animated);
+    // Remember which conversation was selected as the sidebar appeared.
+    // Returning to an unchanged SwiftUI selection can otherwise leave an
+    // empty view with no fresh /conversation/<id> request.
+    @synchronized([NSURLSession class]) {
+        sSidebarEntryConversationID=[sSelectedDetailID copy];
+        sSidebarEntryDetailSerial=sDetailRequestSerial;
+        sSidebarWasShown=YES;
+        sSidebarEpoch++;
+    }
     CGRefreshPins();
     CGRender(self);
+}
+static void CGHistoryDisappear(id self, SEL command, BOOL animated) {
+    __block NSString *cid=nil;
+    __block NSUInteger serial=0, epoch=0;
+    @synchronized([NSURLSession class]) {
+        if (sSidebarWasShown) {
+            cid=[sSidebarEntryConversationID copy];
+            serial=sSidebarEntryDetailSerial;
+            epoch=++sSidebarEpoch;
+            sSidebarWasShown=NO;
+        }
+    }
+    if (sOriginalDisappear)
+        ((void(*)(id,SEL,BOOL))sOriginalDisappear)(self,command,animated);
+    // Wait for native selection/navigation. If any chat detail request starts,
+    // never issue an extra selection and never interfere with the retry logic.
+    if (![[NSUUID alloc] initWithUUIDString:cid ?: @""]) return;
+    __weak UIViewController *weakController=(UIViewController *)self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.85*NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        UIViewController *owner=weakController;
+        if (!owner || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive ||
+            owner.presentedViewController) return;
+        @synchronized([NSURLSession class]) {
+            if (sSidebarEpoch!=epoch || sDetailRequestSerial!=serial ||
+                ![sSelectedDetailID isEqualToString:cid]) return;
+            NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+            if (now-sSidebarLastRestoreAt<6.0) return;
+            sSidebarLastRestoreAt=now;
+        }
+        // Use the existing UUID-guarded native selection bridge, which sets
+        // conversationHasDetails=false and asks the app to load real content.
+        // No fabricated messages, cache deletion or direct model mutation.
+        NSString *title=sHistoryTitles[cid] ?: @"Untitled conversation";
+        CG46OpenPin(owner,cid,title);
+    });
 }
 static void CGInstallNativeHook(void) {
     if (sNativeHookInstalled) return;
@@ -708,7 +762,8 @@ static void CGInstallNativeHook(void) {
     if (!cls) {  return; }
     Method layout = class_getInstanceMethod(cls,@selector(viewDidLayoutSubviews));
     Method appear = class_getInstanceMethod(cls,@selector(viewDidAppear:));
-    if (!layout || !appear) {  return; }
+    Method disappear = class_getInstanceMethod(cls,@selector(viewDidDisappear:));
+    if (!layout || !appear || !disappear) {  return; }
     Method scroll=class_getInstanceMethod(cls,@selector(scrollViewDidScroll:));
     if (scroll) {
         sOriginalScroll=method_getImplementation(scroll);
@@ -717,10 +772,13 @@ static void CGInstallNativeHook(void) {
     }
     sOriginalLayout = method_getImplementation(layout);
     sOriginalAppear = method_getImplementation(appear);
+    sOriginalDisappear = method_getImplementation(disappear);
     class_replaceMethod(cls,@selector(viewDidLayoutSubviews),
         (IMP)CGHistoryLayout,method_getTypeEncoding(layout));
     class_replaceMethod(cls,@selector(viewDidAppear:),
         (IMP)CGHistoryAppear,method_getTypeEncoding(appear));
+    class_replaceMethod(cls,@selector(viewDidDisappear:),
+        (IMP)CGHistoryDisappear,method_getTypeEncoding(disappear));
     SEL one=@selector(collectionView:contextMenuConfigurationForItemAtIndexPath:point:);
     SEL many=@selector(collectionView:contextMenuConfigurationForItemsAtIndexPaths:point:);
     Method m=class_getInstanceMethod(cls,one);
