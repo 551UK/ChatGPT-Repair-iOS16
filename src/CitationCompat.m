@@ -1,4 +1,5 @@
 #import "CitationCompat.h"
+#import "RichMarkupCompat.h"
 
 static BOOL CGRIsCitationMarker(NSString *text) {
     // Only rewrite actual citation tokens. Normal rich URL tokens use the same
@@ -234,6 +235,11 @@ static BOOL CGRRewriteMessage(NSMutableDictionary *message) {
         CGRReplaceProductMarkers(text,@"product");
         CGRCollapseAdjacentDuplicateCitationLinks(text);
 
+        // Modern DIL rich layouts have no equivalent in the 2024 renderer.
+        // Convert to a safe, readable fallback and retain literal URLs.
+        NSString *readable=CGRLegacyReadableRichMarkup(text);
+        if (![readable isEqualToString:text]) text=[readable mutableCopy];
+
         if (![text isEqualToString:original]) {
             newParts[p]=text;
             changed=YES;
@@ -264,19 +270,22 @@ NSData *CGRCitationCompatRewriteJSONData(NSData *data) {
     static NSData *fileciteNeedle;
     static NSData *citeNeedle;
     static NSData *productNeedle;
+    static NSData *richNeedle;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         referencesNeedle=[@"content_references" dataUsingEncoding:NSUTF8StringEncoding];
         fileciteNeedle=[@"filecite" dataUsingEncoding:NSUTF8StringEncoding];
         citeNeedle=[@"cite" dataUsingEncoding:NSUTF8StringEncoding];
         productNeedle=[@"product" dataUsingEncoding:NSUTF8StringEncoding];
+        richNeedle=[@"<AsyncImage" dataUsingEncoding:NSUTF8StringEncoding];
     });
     NSRange whole=NSMakeRange(0,data.length);
     BOOL maybeReferences=[data rangeOfData:referencesNeedle options:0 range:whole].location!=NSNotFound;
     BOOL maybeFilecite=[data rangeOfData:fileciteNeedle options:0 range:whole].location!=NSNotFound;
     BOOL maybeCite=[data rangeOfData: citeNeedle options:0 range:whole].location!=NSNotFound;
     BOOL maybeProduct=[data rangeOfData:productNeedle options:0 range:whole].location!=NSNotFound;
-    if (!maybeReferences && !maybeFilecite && !maybeCite && !maybeProduct) return data;
+    BOOL maybeRich=[data rangeOfData:richNeedle options:0 range:whole].location!=NSNotFound;
+    if (!maybeReferences && !maybeFilecite && !maybeCite && !maybeProduct && !maybeRich) return data;
 
     NSError *error=nil;
     id root=[NSJSONSerialization JSONObjectWithData:data
