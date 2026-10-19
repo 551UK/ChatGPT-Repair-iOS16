@@ -86,7 +86,9 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
                            [original containsString:@"<box "];
     BOOL hasBinding=[original containsString:@"{turn"] &&
                     [original containsString:@"product"];
-    if (!((hasLayout && (hasImage || hasStructuredLink)) || hasBinding))
+    BOOL hasGenUIButton=[original containsString:@"<button"] &&
+                        [original containsString:@"GenUI.openUrl("];
+    if (!((hasLayout && (hasImage || hasStructuredLink)) || hasBinding || hasGenUIButton))
         return original;
 
     NSString *output=original;
@@ -103,6 +105,29 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
             return body;
         return CGRGroup(match,0,text);
     });
+    // Modern response buttons degrade to the same rich URL token understood
+    // by the existing LinkFix. Handle both paired and legacy-unclosed forms.
+    output=CGRReplace(output,
+                      @"<button\\b[^>]*onClick=\\{\\(\\)\\s*=>\\s*GenUI\\.openUrl\\(([\\"\'])(https?://[^\\"\']+)\\1\\)\\}[^>]*>(.*?)</button>",
+                      NSRegularExpressionDotMatchesLineSeparators,
+                      ^NSString *(NSTextCheckingResult *match,NSString *text) {
+        NSString *url=CGRGroup(match,2,text);
+        NSString *label=CGRTrim(CGRGroup(match,3,text) ?: @"");
+        return CGRSafeRichLink(label.length?label:@"Open link",url);
+    });
+    output=CGRReplace(output,
+                      @"<button\\b[^>]*onClick=\\{\\(\\)\\s*=>\\s*GenUI\\.openUrl\\(([\\"\'])(https?://[^\\"\']+)\\1\\)\\}[^>]*>[ \\t\\r\\n]*([^\\r\\n<]+)",
+                      0,^NSString *(NSTextCheckingResult *match,NSString *text) {
+        NSString *url=CGRGroup(match,2,text);
+        NSString *label=CGRTrim(CGRGroup(match,3,text) ?: @"");
+        return CGRSafeRichLink(label.length?label:@"Open link",url);
+    });
+    output=CGRReplace(output,@"<badge\\b[^>]*>(.*?)</badge>",
+                      NSRegularExpressionDotMatchesLineSeparators,
+                      ^NSString *(NSTextCheckingResult *match,NSString *text) {
+        return CGRTrim(CGRGroup(match,1,text) ?: @"");
+    });
+
     // Process links before stripping their enclosing layout wrappers.
     output=CGRReplace(output,@"<Link\\b([^>]*)>(.*?)</Link>",
                       NSRegularExpressionDotMatchesLineSeparators,
@@ -138,7 +163,7 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
 
     // Remove only allowlisted structural tags, not arbitrary HTML/markup.
     output=CGRReplace(output,
-                      @"</?(?:row|box|col|grid|grid-item|flow|flow-item|text|title|caption|card|divider|spacer|list|list-item|table|table-row|table-cell)\\b[^>]*>",
+                      @"</?(?:row|box|col|grid|grid-item|flow|flow-item|text|title|caption|card|divider|spacer|list|list-item|table|table-row|table-cell|badge|button)\\b[^>]*>",
                       NSRegularExpressionDotMatchesLineSeparators,
                       ^NSString *(NSTextCheckingResult *match,NSString *text) {
         NSString *tag=CGRGroup(match,0,text);
