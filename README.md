@@ -30,3 +30,5 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tw
 - v56.7 converts raw GenUI download buttons and badges into clean text/clickable links on the legacy renderer.
 
 - v56.8 fixes the sidebar-return blank-chat bug by snapshotting the selected conversation when the sidebar appears and synchronously reselecting that same conversation when the sidebar disappears, only when no different detail request has started. Earlier timer/hit-test/delayed-controller experiments were removed.
+
+- v56.9 moves the same-chat sidebar reload before the app's original `viewDidDisappear:` runs, because the diagnostic showed the HistoryViewController is detached and its native selection closure is unusable immediately afterwards.
