@@ -14,8 +14,12 @@ assert "![sSelectedDetailID isEqualToString:cid]" in source
 assert "CGSidebarListIsTopmost(owner)" in source
 assert "owner.presentedViewController" in source
 assert "CG46OpenPin(owner,cid,title)" in source
+assert "UIViewController *owner=controller;" in source
+assert "__weak UIViewController *weakController=controller;" not in source
+assert "owner!=sHistoryController" not in source
+assert "0.35*NSEC_PER_SEC" in source
 assert "DISPATCH_SOURCE_TYPE_TIMER" in source
 assert "0.20*NSEC_PER_SEC" in source
 assert "CGHistoryDisappear" not in source
 assert "viewDidDisappear:" not in source
-print("PASS: sidebar visibility transition repair avoids duplicate/native navigation and no longer relies on viewDidDisappear")
+print("PASS: sidebar restore retains dismissed HistoryViewController long enough to fire native reselection and still yields to real detail requests")
