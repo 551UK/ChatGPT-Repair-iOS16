@@ -9,10 +9,16 @@ assert "viewDidDisappear:" in source
 assert "sSidebarEntryConversationID=[sSelectedDetailID copy]" in source
 assert "sSidebarEntryDetailSerial=sDetailRequestSerial" in source
 assert "sDetailRequestSerial++" in source
-assert "sDetailRequestSerial!=serial" in source
-assert "![sSelectedDetailID isEqualToString:cid]" in source
+assert "sDetailRequestSerial==serial" in source
+assert "[sSelectedDetailID isEqualToString:cid]" in source
 assert "CG46OpenPin((UIViewController *)self,cid,title)" in source
 assert "UIApplicationStateActive" in source
+
+# The reload must happen before the app's original viewDidDisappear. The
+# diagnostic showed the HistoryViewModel/selection closure is gone afterwards.
+fn=source[source.index("static void CGHistoryDisappear"):source.index("static void CGInstallNativeHook")]
+assert fn.index("CG46OpenPin((UIViewController *)self,cid,title)") < fn.index("sOriginalDisappear")
+assert "if (CG46OpenPin((UIViewController *)self,cid,title))" in fn
 
 for old in (
     "CGSidebarVisibilityTick",
@@ -32,4 +38,4 @@ for old in (
 ):
     assert old not in source, old
 
-print("PASS: final sidebar repair uses direct lifecycle reselection only")
+print("PASS: sidebar reload runs before original viewDidDisappear while HistoryViewModel is alive")
