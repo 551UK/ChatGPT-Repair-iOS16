@@ -178,10 +178,11 @@ jobs:
           tag="v56.8"
           artifact="dist/ChatGPTRepair_56.8_iphoneos-arm64.deb"
           cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
-          Fixes sidebar-return blanking using the lifetime behavior captured by the standalone diagnostic.
+          Fixes sidebar-return blanking using the lifecycle behavior captured by the standalone diagnostic.
 
-          - Retains the dismissed HistoryViewController briefly because the diagnostic proved ChatGPT removes it about 0.2 seconds after sidebar close.
-          - Uses its existing native selection closure to reload the unchanged selected chat after the drawer has gone.
+          - The diagnostic proved HistoryViewController viewDidDisappear fires reliably immediately before the drawer controller is removed.
+          - Snapshots the selected conversation when the sidebar appears and reselects it synchronously in viewDidDisappear only when no new detail request has started.
+          - Removes the previous visibility polling, delayed weak-owner and retained-controller experiments.
           - Still yields immediately when a real conversation detail request starts; no fabricated chat data or cache clearing.
           - Keeps normal URL/download labels untouched.
           - Preserves v56.7 renderer/link/download/history/pin behavior plus prior rich markup, citation and product cleanup, web/file citation compatibility, blank-chat retries, history, pin/unpin, downloads and compatibility components.
@@ -207,3 +208,31 @@ jobs:
           gh release view v56.8 --repo "$GITHUB_REPOSITORY" --json assets \
             --jq '.assets[].name' | grep -Fxq "ChatGPTRepair_56.8_iphoneos-arm64.deb"
           gh release view v56.7 --repo "$GITHUB_REPOSITORY" >/dev/null
+
+      - name: Delete all older DEB release assets
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          keep="ChatGPTRepair_56.8_iphoneos-arm64.deb"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq '.[] | [.id, .tag_name] | @tsv' |
+          while IFS=\t' read -r release_id tag; do
+            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" \
+              --jq '.[] | select(.name | endswith(".deb")) | [.id, .name] | @tsv' |
+            while IFS=\t' read -r asset_id name; do
+              [ -n "$asset_id" ] || continue
+              if [ "$name" != "$keep" ]; then
+                echo "Deleting old DEB asset: $tag / $name"
+                gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+              fi
+            done
+          done
+          count="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq '[.[]?.assets[]? | select(.name | endswith(".deb")) | .name] | .[]' | wc -l | tr -d ' ')"
+          test "$count" -eq 1
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq '.[]?.assets[]? | select(.name | endswith(".deb")) | .name' |
+            grep -Fxq "$keep"
