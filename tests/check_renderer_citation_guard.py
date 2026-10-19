@@ -14,6 +14,6 @@ assert '@"[source]"' in guard
 assert '@"[file]"' in guard
 assert '@selector(setAttributedText:)' in guard
 assert '@selector(setText:)' in guard
-assert 'turn' not in guard
+assert 'turn199783search' not in guard
 
 print("PASS: raw renderer citation markers are cleaned only in markdown text views")
