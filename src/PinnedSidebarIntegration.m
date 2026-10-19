@@ -722,23 +722,34 @@ static void CGHistoryDisappear(id self, SEL command, BOOL animated) {
         sSidebarEntryConversationID=nil;
     }
 
-    if (sOriginalDisappear)
-        ((void(*)(id,SEL,BOOL))sOriginalDisappear)(self,command,animated);
+    // Reload while HistoryViewController still owns its HistoryViewModel.
+    // The sidebar diagnostic proved that after the app's original
+    // viewDidDisappear: returns, controller.view.window is already nil and the
+    // native selection closure is no longer usable.
+    BOOL shouldRestore=UIApplication.sharedApplication.applicationState==UIApplicationStateActive &&
+        [self isKindOfClass:UIViewController.class] &&
+        [[NSUUID alloc] initWithUUIDString:cid ?: @""]!=nil;
 
-    if (UIApplication.sharedApplication.applicationState!=UIApplicationStateActive ||
-        ![self isKindOfClass:UIViewController.class] ||
-        ![[NSUUID alloc] initWithUUIDString:cid ?: @""]) return;
-
-    @synchronized([NSURLSession class]) {
-        if (sDetailRequestSerial!=serial || ![sSelectedDetailID isEqualToString:cid])
-            return;
-        NSTimeInterval now=NSDate.date.timeIntervalSince1970;
-        if (now-sSidebarLastRestoreAt<0.75) return;
-        sSidebarLastRestoreAt=now;
+    NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+    if (shouldRestore) {
+        @synchronized([NSURLSession class]) {
+            shouldRestore=sDetailRequestSerial==serial &&
+                [sSelectedDetailID isEqualToString:cid] &&
+                now-sSidebarLastRestoreAt>=0.75;
+        }
     }
 
-    NSString *title=sHistoryTitles[cid] ?: @"Untitled conversation";
-    CG46OpenPin((UIViewController *)self,cid,title);
+    if (shouldRestore) {
+        NSString *title=sHistoryTitles[cid] ?: @"Untitled conversation";
+        if (CG46OpenPin((UIViewController *)self,cid,title)) {
+            @synchronized([NSURLSession class]) {
+                sSidebarLastRestoreAt=now;
+            }
+        }
+    }
+
+    if (sOriginalDisappear)
+        ((void(*)(id,SEL,BOOL))sOriginalDisappear)(self,command,animated);
 }
 static void CGInstallNativeHook(void) {
     if (sNativeHookInstalled) return;
