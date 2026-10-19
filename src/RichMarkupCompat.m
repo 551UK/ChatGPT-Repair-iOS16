@@ -108,7 +108,7 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
     // Modern response buttons degrade to the same rich URL token understood
     // by the existing LinkFix. Handle both paired and legacy-unclosed forms.
     output=CGRReplace(output,
-                      @"<button\\b[^>]*onClick=\\{\\(\\)\\s*=>\\s*GenUI\\.openUrl\\(([\\"\'])(https?://[^\\"\']+)\\1\\)\\}[^>]*>(.*?)</button>",
+                      @"<button\\b[^>]*onClick=\\{\\(\\)\\s*=>\\s*GenUI\\.openUrl\\(\"(https?://[^\\r\\n]+?)\"\\)\\}[^>]*>(.*?)</button>",
                       NSRegularExpressionDotMatchesLineSeparators,
                       ^NSString *(NSTextCheckingResult *match,NSString *text) {
         NSString *url=CGRGroup(match,2,text);
@@ -116,7 +116,7 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
         return CGRSafeRichLink(label.length?label:@"Open link",url);
     });
     output=CGRReplace(output,
-                      @"<button\\b[^>]*onClick=\\{\\(\\)\\s*=>\\s*GenUI\\.openUrl\\(([\\"\'])(https?://[^\\"\']+)\\1\\)\\}[^>]*>[ \\t\\r\\n]*([^\\r\\n<]+)",
+                      @"<button\\b[^>]*onClick=\\{\\(\\)\\s*=>\\s*GenUI\\.openUrl\\(\"(https?://[^\\r\\n]+?)\"\\)\\}[^>]*>[ \\t\\r\\n]*([^\\r\\n<]+)",
                       0,^NSString *(NSTextCheckingResult *match,NSString *text) {
         NSString *url=CGRGroup(match,2,text);
         NSString *label=CGRTrim(CGRGroup(match,3,text) ?: @"");
