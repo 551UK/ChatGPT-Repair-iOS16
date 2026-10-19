@@ -61,6 +61,70 @@ static NSString *CGRSafeRichLink(NSString *label, NSString *urlString) {
             label,url.absoluteString];
 }
 
+
+static NSString *CGRReplaceGenUIButtons(NSString *input) {
+    if (![input containsString:@"<button"] || ![input containsString:@"GenUI.openUrl("])
+        return input;
+
+    NSMutableString *output=[input mutableCopy];
+    NSUInteger cursor=0;
+    NSCharacterSet *ws=[NSCharacterSet whitespaceAndNewlineCharacterSet];
+
+    while (cursor<output.length) {
+        NSRange start=[output rangeOfString:@"<button" options:0
+                                     range:NSMakeRange(cursor,output.length-cursor)];
+        if (start.location==NSNotFound) break;
+        NSRange tagEnd=[output rangeOfString:@">" options:0
+                                      range:NSMakeRange(start.location,output.length-start.location)];
+        if (tagEnd.location==NSNotFound) break;
+
+        NSRange tagRange=NSMakeRange(start.location,NSMaxRange(tagEnd)-start.location);
+        NSString *tag=[output substringWithRange:tagRange];
+        NSRange call=[tag rangeOfString:@"GenUI.openUrl("];
+        if (call.location==NSNotFound) {
+            cursor=NSMaxRange(tagRange);
+            continue;
+        }
+
+        NSUInteger pos=NSMaxRange(call);
+        while (pos<tag.length && [ws characterIsMember:[tag characterAtIndex:pos]]) pos++;
+        if (pos>=tag.length) { cursor=NSMaxRange(tagRange); continue; }
+        unichar quote=[tag characterAtIndex:pos];
+        if (quote!='"' && quote!='\'') { cursor=NSMaxRange(tagRange); continue; }
+        NSUInteger urlStart=++pos;
+        while (pos<tag.length && [tag characterAtIndex:pos]!=quote) pos++;
+        if (pos<=urlStart || pos>=tag.length) { cursor=NSMaxRange(tagRange); continue; }
+        NSString *url=[tag substringWithRange:NSMakeRange(urlStart,pos-urlStart)];
+
+        NSUInteger labelStart=NSMaxRange(tagRange);
+        while (labelStart<output.length &&
+               [ws characterIsMember:[output characterAtIndex:labelStart]]) labelStart++;
+
+        NSRange closing=[output rangeOfString:@"</button>" options:0
+                                       range:NSMakeRange(labelStart,output.length-labelStart)];
+        NSUInteger wholeEnd=0;
+        NSString *label=nil;
+        if (closing.location!=NSNotFound && closing.location-labelStart<4096) {
+            label=[output substringWithRange:NSMakeRange(labelStart,closing.location-labelStart)];
+            wholeEnd=NSMaxRange(closing);
+        } else {
+            NSRange newline=[output rangeOfCharacterFromSet:[NSCharacterSet newlineCharacterSet]
+                                                    options:0
+                                                      range:NSMakeRange(labelStart,output.length-labelStart)];
+            NSUInteger labelEnd=newline.location==NSNotFound?output.length:newline.location;
+            label=[output substringWithRange:NSMakeRange(labelStart,labelEnd-labelStart)];
+            wholeEnd=labelEnd;
+        }
+
+        label=CGRTrim(label ?: @"");
+        NSString *replacement=CGRSafeRichLink(label.length?label:@"Open link",url);
+        NSRange whole=NSMakeRange(start.location,wholeEnd-start.location);
+        [output replaceCharactersInRange:whole withString:replacement];
+        cursor=start.location+replacement.length;
+    }
+    return output;
+}
+
 static NSString *CGRFriendlyPlaceholder(NSTextCheckingResult *match, NSString *original) {
     NSString *field=CGRGroup(match,1,original);
     if ([field isEqualToString:@"displayed_price"] ||
@@ -86,7 +150,9 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
                            [original containsString:@"<box "];
     BOOL hasBinding=[original containsString:@"{turn"] &&
                     [original containsString:@"product"];
-    if (!((hasLayout && (hasImage || hasStructuredLink)) || hasBinding))
+    BOOL hasGenUIButton=[original containsString:@"<button"] &&
+                        [original containsString:@"GenUI.openUrl("];
+    if (!((hasLayout && (hasImage || hasStructuredLink)) || hasBinding || hasGenUIButton))
         return original;
 
     NSString *output=original;
@@ -103,6 +169,15 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
             return body;
         return CGRGroup(match,0,text);
     });
+    // Modern response buttons degrade to the same rich URL token understood
+    // by the existing LinkFix. Parse rather than regex the nested arrow-call syntax.
+    output=CGRReplaceGenUIButtons(output);
+    output=CGRReplace(output,@"<badge\\b[^>]*>(.*?)</badge>",
+                      NSRegularExpressionDotMatchesLineSeparators,
+                      ^NSString *(NSTextCheckingResult *match,NSString *text) {
+        return CGRTrim(CGRGroup(match,1,text) ?: @"");
+    });
+
     // Process links before stripping their enclosing layout wrappers.
     output=CGRReplace(output,@"<Link\\b([^>]*)>(.*?)</Link>",
                       NSRegularExpressionDotMatchesLineSeparators,
@@ -138,7 +213,7 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
 
     // Remove only allowlisted structural tags, not arbitrary HTML/markup.
     output=CGRReplace(output,
-                      @"</?(?:row|box|col|grid|grid-item|flow|flow-item|text|title|caption|card|divider|spacer|list|list-item|table|table-row|table-cell)\\b[^>]*>",
+                      @"</?(?:row|box|col|grid|grid-item|flow|flow-item|text|title|caption|card|divider|spacer|list|list-item|table|table-row|table-cell|badge|button)\\b[^>]*>",
                       NSRegularExpressionDotMatchesLineSeparators,
                       ^NSString *(NSTextCheckingResult *match,NSString *text) {
         NSString *tag=CGRGroup(match,0,text);

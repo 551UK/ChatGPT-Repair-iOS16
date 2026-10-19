@@ -181,6 +181,25 @@ int main(void) {
         NSString *bound=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(bindingRoot))));
         NSCAssert([bound containsString:@"[price unavailable]"],@"standalone binding leaked");
 
+
+        // Screenshot regression: modern GenUI button/badge markup was shown
+        // literally by ChatGPT 1.2024.200 even though the embedded URL worked.
+        NSString *genUIButton=@"**ChatGPTRepair v56.6 – Test fix**\n"
+            "<badge color=\"success\">Build passed</badge>\n\n"
+            "<button block onClick={() => GenUI.openUrl(\"https://github.com/551UK/ChatGPT-Repair-iOS16/releases/download/v56.6/ChatGPTRepair_56.6_iphoneos-arm64.deb\")}>\n"
+            "Download v56.6 DEB\n\n"
+            "GitHub release · Previous v56.5";
+        NSDictionary *genRoot=@{@"message":@{
+            @"content":@{@"parts":@[genUIButton]},@"metadata":@{}
+        }};
+        NSString *genOut=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(genRoot))));
+        NSCAssert(![genOut containsString:@"<badge"],@"raw badge leaked");
+        NSCAssert(![genOut containsString:@"<button"],@"raw GenUI button leaked");
+        NSCAssert(![genOut containsString:@"GenUI.openUrl"],@"raw GenUI call leaked");
+        NSCAssert([genOut containsString:@"Build passed"],@"badge text lost");
+        NSCAssert([genOut containsString:@"\uE200url\uE202Download v56.6 DEB\uE202https://github.com/551UK/ChatGPT-Repair-iOS16/releases/download/v56.6/ChatGPTRepair_56.6_iphoneos-arm64.deb\uE201"],
+                  @"GenUI download did not become a rich clickable URL token");
+
         NSLog(@"PASS: citations compact cleanly, product markers render cleanly, and normal download links stay intact");
     }
     return 0;
