@@ -74,29 +74,40 @@ static NSString *CGRReplaceGenUIButtons(NSString *input) {
         NSRange start=[output rangeOfString:@"<button" options:0
                                      range:NSMakeRange(cursor,output.length-cursor)];
         if (start.location==NSNotFound) break;
-        NSRange tagEnd=[output rangeOfString:@">" options:0
-                                      range:NSMakeRange(start.location,output.length-start.location)];
-        if (tagEnd.location==NSNotFound) break;
 
-        NSRange tagRange=NSMakeRange(start.location,NSMaxRange(tagEnd)-start.location);
-        NSString *tag=[output substringWithRange:tagRange];
-        NSRange call=[tag rangeOfString:@"GenUI.openUrl("];
+        // Do not search for the first '>' here: the JavaScript arrow itself is
+        // '=>'. Find GenUI.openUrl first, parse its quoted URL, then locate the
+        // real tag terminator after that call.
+        NSUInteger searchLength=MIN((NSUInteger)4096,output.length-start.location);
+        NSRange call=[output rangeOfString:@"GenUI.openUrl(" options:0
+                                    range:NSMakeRange(start.location,searchLength)];
         if (call.location==NSNotFound) {
-            cursor=NSMaxRange(tagRange);
+            cursor=NSMaxRange(start);
             continue;
         }
 
         NSUInteger pos=NSMaxRange(call);
-        while (pos<tag.length && [ws characterIsMember:[tag characterAtIndex:pos]]) pos++;
-        if (pos>=tag.length) { cursor=NSMaxRange(tagRange); continue; }
-        unichar quote=[tag characterAtIndex:pos];
-        if (quote!='"' && quote!='\'') { cursor=NSMaxRange(tagRange); continue; }
-        NSUInteger urlStart=++pos;
-        while (pos<tag.length && [tag characterAtIndex:pos]!=quote) pos++;
-        if (pos<=urlStart || pos>=tag.length) { cursor=NSMaxRange(tagRange); continue; }
-        NSString *url=[tag substringWithRange:NSMakeRange(urlStart,pos-urlStart)];
+        while (pos<output.length && [ws characterIsMember:[output characterAtIndex:pos]]) pos++;
+        if (pos>=output.length) break;
+        unichar quote=[output characterAtIndex:pos];
+        if (quote!='"' && quote!='\'') {
+            cursor=NSMaxRange(call);
+            continue;
+        }
 
-        NSUInteger labelStart=NSMaxRange(tagRange);
+        NSUInteger urlStart=++pos;
+        while (pos<output.length && [output characterAtIndex:pos]!=quote) pos++;
+        if (pos<=urlStart || pos>=output.length) {
+            cursor=NSMaxRange(call);
+            continue;
+        }
+        NSString *url=[output substringWithRange:NSMakeRange(urlStart,pos-urlStart)];
+
+        NSRange tagEnd=[output rangeOfString:@">" options:0
+                                      range:NSMakeRange(pos,output.length-pos)];
+        if (tagEnd.location==NSNotFound) break;
+
+        NSUInteger labelStart=NSMaxRange(tagEnd);
         while (labelStart<output.length &&
                [ws characterIsMember:[output characterAtIndex:labelStart]]) labelStart++;
 
