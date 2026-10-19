@@ -75,22 +75,22 @@ jobs:
           strings build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib | grep -F "X-551UK-History-Cache" >/dev/null
           strings build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib | grep -F "content_references" >/dev/null
 
-      - name: Download exact clean v56.7 baseline
+      - name: Download exact clean v56.8 baseline
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build/base-artifact
-          gh release download v56.7 \
+          gh release download v56.8 \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern "ChatGPTRepair_56.7_iphoneos-arm64.deb" \
+            --pattern "ChatGPTRepair_56.8_iphoneos-arm64.deb" \
             --dir build/base-artifact
-          cp build/base-artifact/ChatGPTRepair_56.7_iphoneos-arm64.deb build/ChatGPTRepair_56.7_iphoneos-arm64.deb
-          actual="$(shasum -a 256 build/ChatGPTRepair_56.7_iphoneos-arm64.deb | awk '{print $1}')"
+          cp build/base-artifact/ChatGPTRepair_56.8_iphoneos-arm64.deb build/ChatGPTRepair_56.8_iphoneos-arm64.deb
+          actual="$(shasum -a 256 build/ChatGPTRepair_56.8_iphoneos-arm64.deb | awk '{print $1}')"
           expected="e4bd276782a61884154950a6b9fea854bf57668f60b4270463fec7e24638f199"
           test "$actual" = "$expected"
-          test "$(dpkg-deb -f build/ChatGPTRepair_56.7_iphoneos-arm64.deb Version)" = "56.7"
+          test "$(dpkg-deb -f build/ChatGPTRepair_56.8_iphoneos-arm64.deb Version)" = "56.8"
 
       - name: Build clean v56.9 package
         shell: bash
@@ -98,7 +98,7 @@ jobs:
           set -euo pipefail
           rm -rf build/pkgroot build/basecheck build/finalcheck dist
           mkdir -p build/pkgroot build/basecheck build/finalcheck dist
-          dpkg-deb -R build/ChatGPTRepair_56.7_iphoneos-arm64.deb build/pkgroot
+          dpkg-deb -R build/ChatGPTRepair_56.8_iphoneos-arm64.deb build/pkgroot
 
           target="build/pkgroot/var/jb/Library/MobileSubstrate/DynamicLibraries"
           cp build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib "$target/ChatGPTRepair.dylib"
@@ -108,9 +108,9 @@ jobs:
           from pathlib import Path
           p=Path("build/pkgroot/DEBIAN/control")
           text=p.read_text()
-          if "Version: 56.7\n" not in text:
-              raise SystemExit("Expected v56.7 baseline")
-          p.write_text(text.replace("Version: 56.7\n","Version: 56.9\n",1))
+          if "Version: 56.8\n" not in text:
+              raise SystemExit("Expected v56.8 baseline")
+          p.write_text(text.replace("Version: 56.8\n","Version: 56.9\n",1))
           PY
 
           dpkg-deb --root-owner-group -b build/pkgroot dist/ChatGPTRepair_56.9_iphoneos-arm64.deb
@@ -121,7 +121,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dpkg-deb -x build/ChatGPTRepair_56.7_iphoneos-arm64.deb build/basecheck
+          dpkg-deb -x build/ChatGPTRepair_56.8_iphoneos-arm64.deb build/basecheck
           dpkg-deb -x dist/ChatGPTRepair_56.9_iphoneos-arm64.deb build/finalcheck
           base="build/basecheck/var/jb/Library/MobileSubstrate/DynamicLibraries"
           final="build/finalcheck/var/jb/Library/MobileSubstrate/DynamicLibraries"
@@ -185,7 +185,7 @@ jobs:
           - Still skips the repair when another/native detail request has already started.
           - Still yields immediately when a real conversation detail request starts; no fabricated chat data or cache clearing.
           - Keeps normal URL/download labels untouched.
-          - Preserves v56.7 renderer/link/download/history/pin behavior plus prior rich markup, citation and product cleanup, web/file citation compatibility, blank-chat retries, history, pin/unpin, downloads and compatibility components.
+          - Preserves v56.8 renderer/link/download/history/pin behavior plus prior rich markup, citation and product cleanup, web/file citation compatibility, blank-chat retries, history, pin/unpin, downloads and compatibility components.
           NOTES
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --clobber
@@ -206,7 +206,7 @@ jobs:
           set -euo pipefail
           gh release view v56.9 --repo "$GITHUB_REPOSITORY" --json assets \
             --jq '.assets[].name' | grep -Fxq "ChatGPTRepair_56.9_iphoneos-arm64.deb"
-          gh release view v56.7 --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release view v56.8 --repo "$GITHUB_REPOSITORY" >/dev/null
 
       - name: Delete all older DEB release assets
         if: github.ref == 'refs/heads/main'
