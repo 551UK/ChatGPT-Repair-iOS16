@@ -62,3 +62,8 @@ assert "job.attempts<3" in cache
 assert 'X-551UK-History-Retry' in pins
 
 print("PASS: cached 429 fallback, TPP merge retry, detail retry, and existing pin/history behaviour")
+
+assert 'CGRestoreSelectedAfterHistoryRefresh' in pins
+assert 'sVisibleHistoryController' in pins
+history_completion=pins[pins.index('CGOriginMergePage(historyConfig'):pins.index('// Resolve modern web citation markers')]
+assert history_completion.index('originalForward(combined,combinedResponse,combinedError);') < history_completion.index('CGRestoreSelectedAfterHistoryRefresh();')

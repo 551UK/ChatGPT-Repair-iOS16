@@ -43,6 +43,8 @@ static NSMutableSet *sPinWrites;
 static NSMutableDictionary<NSString *, NSString *> *sHistoryTitles;
 static NSString *sMenuID, *sMenuTitle;
 static __weak UIViewController *sMenuOwner;
+static __weak UIViewController *sVisibleHistoryController;
+extern BOOL CG46OpenPin(UIViewController *, NSString *, NSString *);
 static void CGRender(id controller);
 static void CGRefreshPins(void);
 static void CGPinError(UIViewController *owner, NSString *message) {
@@ -242,6 +244,31 @@ static BOOL CGDetailStillSelected(NSString *cid, NSUInteger generation) {
             sSelectedDetailGeneration==generation;
     }
 }
+static void CGRestoreSelectedAfterHistoryRefresh(void) {
+    NSString *cid=nil;
+    NSUInteger serial=0;
+    UIViewController *controller=sVisibleHistoryController;
+    @synchronized([NSURLSession class]) {
+        cid=[sSelectedDetailID copy];
+        serial=sDetailRequestSerial;
+    }
+    if (!controller || !controller.view.window ||
+        UIApplication.sharedApplication.applicationState!=UIApplicationStateActive ||
+        ![[NSUUID alloc] initWithUUIDString:cid ?: @""]) return;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *owner=sVisibleHistoryController;
+        if (!owner || !owner.view.window ||
+            UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)
+            return;
+        @synchronized([NSURLSession class]) {
+            if (sDetailRequestSerial!=serial ||
+                ![sSelectedDetailID isEqualToString:cid]) return;
+        }
+        NSString *title=sHistoryTitles[cid] ?: @"Untitled conversation";
+        CG46OpenPin(owner,cid,title);
+    });
+}
 static void CGDetailFinishCancelled(void (^completion)(NSData *,NSURLResponse *,NSError *)) {
     if (completion) completion(nil,nil,
         [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);
@@ -434,8 +461,12 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
                 ^(NSData *usableData,NSURLResponse *usableResponse,NSError *usableError) {
                     CGOriginMergePage(historyConfig,request,usableData,usableResponse,usableError,
                         ^(NSData *combined,NSURLResponse *combinedResponse,NSError *combinedError) {
-                            if (!combinedError) CGRememberHistory(combined);
+                            NSInteger historyStatus=[combinedResponse isKindOfClass:NSHTTPURLResponse.class]
+                                ?((NSHTTPURLResponse *)combinedResponse).statusCode:0;
+                            BOOL successful=!combinedError && historyStatus>=200 && historyStatus<300;
+                            if (successful) CGRememberHistory(combined);
                             originalForward(combined,combinedResponse,combinedError);
+                            if (successful) CGRestoreSelectedAfterHistoryRefresh();
                         });
                 });
         };
@@ -551,8 +582,6 @@ static NSString *CGSearchText(UIView *search) {
     if ([search isKindOfClass:UITextField.class]) return ((UITextField *)search).text ?: @"";
     return @"";
 }
-extern BOOL CG46OpenPin(UIViewController *, NSString *, NSString *);
-
 /*
  * Prefer the first date heading. If it is a SwiftUI-rendered collection
  * supplementary view, take its actual UIKit layout frame instead.
@@ -706,6 +735,8 @@ static void CGHistoryScroll(id self, SEL command, UIScrollView *scroll) {
 }
 static void CGHistoryAppear(id self, SEL command, BOOL animated) {
     ((void(*)(id, SEL, BOOL))sOriginalAppear)(self,command,animated);
+    if ([self isKindOfClass:UIViewController.class])
+        sVisibleHistoryController=(UIViewController *)self;
     @synchronized([NSURLSession class]) {
         sSidebarEntryConversationID=[sSelectedDetailID copy];
         sSidebarEntryDetailSerial=sDetailRequestSerial;
@@ -714,6 +745,8 @@ static void CGHistoryAppear(id self, SEL command, BOOL animated) {
     CGRender(self);
 }
 static void CGHistoryDisappear(id self, SEL command, BOOL animated) {
+    if (sVisibleHistoryController==(UIViewController *)self)
+        sVisibleHistoryController=nil;
     NSString *cid=nil;
     NSUInteger serial=0;
     @synchronized([NSURLSession class]) {

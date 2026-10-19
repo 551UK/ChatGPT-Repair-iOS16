@@ -39,3 +39,11 @@ for old in (
     assert old not in source, old
 
 print("PASS: sidebar reload runs before original viewDidDisappear while HistoryViewModel is alive")
+
+assert "sVisibleHistoryController" in source
+assert "CGRestoreSelectedAfterHistoryRefresh" in source
+refresh=source[source.index("static void CGRestoreSelectedAfterHistoryRefresh"):source.index("static void CGDetailFinishCancelled")]
+assert "dispatch_after" not in refresh
+assert "dispatch_async(dispatch_get_main_queue()" in refresh
+assert "sDetailRequestSerial!=serial" in refresh
+assert "CG46OpenPin(owner,cid,title)" in refresh
