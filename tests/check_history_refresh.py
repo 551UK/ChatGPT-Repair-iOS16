@@ -74,3 +74,12 @@ assert history_completion.index('CGRememberHistory(combined)') < history_complet
 assert history_completion.index('CGShouldQuarantineActiveHistory(request)') < history_completion.index('originalForward(combined,combinedResponse,combinedError);')
 assert 'sSidebarHistoryRefreshArmed' not in pins
 assert 'CGRepairCollapsedChatIfNeeded' not in pins
+
+
+# Progressive first-page sidebar loading: normal history immediately, TPP merged later.
+assert 'CGOriginMergePageProgressive' in merge
+assert 'pending.progressive=YES' in merge
+assert 'if (item.progressive) CGOriginCancelPending(item)' in merge
+assert 'CGOriginMergePageProgressive(historyConfig,request' in pins
+assert 'CGHistoryFirstPage(request) && !CGHasSelectedConversation()' in pins
+assert 'if (CGHasSelectedConversation()) return;' in pins

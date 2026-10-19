@@ -9,6 +9,7 @@ static NSString *const kMergeHeader = @"X-551UK-History-Merge";
 @property(nonatomic,strong) NSError *error;
 @property(nonatomic,strong) NSURLSession *session;
 @property(nonatomic,assign) BOOL finished;
+@property(nonatomic,assign) BOOL progressive;
 @end
 @implementation CGOriginPendingMerge
 @end
@@ -41,13 +42,25 @@ static void CGOriginFinishPending(CGOriginPendingMerge *pending,
     if (cancelSession && session) [session invalidateAndCancel];
     if (completion) completion(data,response,error);
 }
+static void CGOriginCancelPending(CGOriginPendingMerge *pending) {
+    if (!pending) return;
+    NSURLSession *session=nil;
+    @synchronized(CGOriginPendingLock()) {
+        if (pending.finished) return;
+        pending.finished=YES;
+        session=pending.session;
+        [CGOriginPendings() removeObject:pending];
+    }
+    if (session) [session invalidateAndCancel];
+}
 void CGOriginMergeConversationDidOpen(void) {
     NSArray<CGOriginPendingMerge *> *pending=nil;
     @synchronized(CGOriginPendingLock()) {
         pending=CGOriginPendings().allObjects;
     }
     for (CGOriginPendingMerge *item in pending) {
-        CGOriginFinishPending(item,item.data,item.response,item.error,YES);
+        if (item.progressive) CGOriginCancelPending(item);
+        else CGOriginFinishPending(item,item.data,item.response,item.error,YES);
     }
 }
 
@@ -215,6 +228,62 @@ static void CGOriginFetchWithRetry(NSURLSession *session, NSURLRequest *request,
         start();
     }
 }
+void CGOriginMergePageProgressive(NSURLSessionConfiguration *configuration, NSURLRequest *request,
+                                  NSData *data, NSURLResponse *response, NSError *error,
+                                  CGOriginMergeCompletion initialCompletion,
+                                  CGOriginMergeCompletion mergedCompletion) {
+    if (!initialCompletion) return;
+    NSInteger code=[response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;
+    NSUInteger offset=0, limit=0;
+    if (error || code!=200 || !CGOriginMergeEligible(request) ||
+        !CGReadPage(request,&offset,&limit) || offset!=0 || !CGPageDocument(data)) {
+        initialCompletion(data,response,error);
+        return;
+    }
+
+    initialCompletion(data,response,error);
+    if (!mergedCompletion) return;
+
+    NSMutableURLRequest *tpp=CGOriginRequest(request,YES,limit);
+    if (!tpp) return;
+
+    NSURLSessionConfiguration *config=[configuration copy] ?: [NSURLSessionConfiguration defaultSessionConfiguration];
+    config.timeoutIntervalForRequest=12;
+    config.timeoutIntervalForResource=30;
+    __block NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
+
+    CGOriginPendingMerge *pending=[CGOriginPendingMerge new];
+    pending.completion=mergedCompletion;
+    pending.response=response;
+    pending.session=session;
+    pending.progressive=YES;
+    @synchronized(CGOriginPendingLock()) {
+        [CGOriginPendings() addObject:pending];
+    }
+
+    BOOL baseWasRateLimitFallback=NO;
+    if ([response isKindOfClass:NSHTTPURLResponse.class]) {
+        baseWasRateLimitFallback=[CGOriginHeader((NSHTTPURLResponse *)response,@"X-551UK-History-Cache")
+                                  isEqualToString:@"rate-limit-fallback"];
+    }
+    NSTimeInterval initialDelay=baseWasRateLimitFallback?8.0:0.0;
+    CGOriginFetchWithRetry(session,tpp,0,initialDelay,^(NSData *tppData, NSURLResponse *reply, NSError *networkError) {
+        NSInteger status=[reply isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)reply).statusCode:0;
+        NSData *merged=nil;
+        if (!networkError && status==200 && CGPageDocument(tppData))
+            merged=CGOriginMergeJSON(data,tppData,0,limit);
+
+        [session finishTasksAndInvalidate];
+        session=nil;
+
+        if (!merged) {
+            CGOriginCancelPending(pending);
+            return;
+        }
+        CGOriginFinishPending(pending,merged,response,nil,NO);
+    });
+}
+
 void CGOriginMergePage(NSURLSessionConfiguration *configuration, NSURLRequest *request,
                        NSData *data, NSURLResponse *response, NSError *error,
                        CGOriginMergeCompletion completion) {

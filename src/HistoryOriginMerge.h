@@ -12,6 +12,12 @@ FOUNDATION_EXPORT void CGOriginMergePage(NSURLSessionConfiguration *configuratio
                                          NSURLResponse *response, NSError *error,
                                          CGOriginMergeCompletion completion);
 
+FOUNDATION_EXPORT void CGOriginMergePageProgressive(NSURLSessionConfiguration *configuration,
+                                                    NSURLRequest *request, NSData *data,
+                                                    NSURLResponse *response, NSError *error,
+                                                    CGOriginMergeCompletion initialCompletion,
+                                                    CGOriginMergeCompletion mergedCompletion);
+
 // If a conversation opens while an asynchronous two-origin history merge is
 // still pending, immediately forward the already-valid base history result and
 // ignore the late merge completion. This prevents the legacy 2024 app from

@@ -266,6 +266,11 @@ static BOOL CGShouldQuarantineActiveHistory(NSURLRequest *request) {
     else dispatch_sync(dispatch_get_main_queue(),probe);
     return historyIsOnScreen;
 }
+static BOOL CGHasSelectedConversation(void) {
+    @synchronized([NSURLSession class]) {
+        return [[NSUUID alloc] initWithUUIDString:sSelectedDetailID ?: @""]!=nil;
+    }
+}
 static void CGDetailFinishCancelled(void (^completion)(NSData *,NSURLResponse *,NSError *)) {
     if (completion) completion(nil,nil,
         [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);
@@ -456,6 +461,24 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
         forward=^(NSData *data,NSURLResponse *response,NSError *error) {
             CGHistoryPageResult(request,historyConfig,data,response,error,
                 ^(NSData *usableData,NSURLResponse *usableResponse,NSError *usableError) {
+                    NSInteger usableStatus=[usableResponse isKindOfClass:NSHTTPURLResponse.class]
+                        ?((NSHTTPURLResponse *)usableResponse).statusCode:0;
+                    BOOL usableSuccess=!usableError && usableStatus>=200 && usableStatus<300;
+
+                    if (usableSuccess && CGHistoryFirstPage(request) && !CGHasSelectedConversation()) {
+                        CGOriginMergePageProgressive(historyConfig,request,usableData,usableResponse,usableError,
+                            ^(NSData *initialData,NSURLResponse *initialResponse,NSError *initialError) {
+                                if (!initialError) CGRememberHistory(initialData);
+                                originalForward(initialData,initialResponse,initialError);
+                            },
+                            ^(NSData *mergedData,NSURLResponse *mergedResponse,NSError *mergedError) {
+                                if (CGHasSelectedConversation()) return;
+                                if (!mergedError) CGRememberHistory(mergedData);
+                                originalForward(mergedData,mergedResponse,mergedError);
+                            });
+                        return;
+                    }
+
                     CGOriginMergePage(historyConfig,request,usableData,usableResponse,usableError,
                         ^(NSData *combined,NSURLResponse *combinedResponse,NSError *combinedError) {
                             NSInteger historyStatus=[combinedResponse isKindOfClass:NSHTTPURLResponse.class]
@@ -463,11 +486,6 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
                             BOOL successful=!combinedError && historyStatus>=200 && historyStatus<300;
                             if (successful) CGRememberHistory(combined);
 
-                            // The 2024 HistoryViewModel clears the live Messages model
-                            // when this automatic first-page refresh is applied while
-                            // a conversation is already open. Keep fetching/merging for
-                            // our own history metadata, but do not let that destructive
-                            // refresh mutate the legacy model.
                             if (successful && CGShouldQuarantineActiveHistory(request)) {
                                 NSError *historyCancelled=[NSError errorWithDomain:NSURLErrorDomain
                                     code:NSURLErrorCancelled
