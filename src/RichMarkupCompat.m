@@ -111,15 +111,15 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
                       @"<button\\b[^>]*onClick=\\{\\(\\)\\s*=>\\s*GenUI\\.openUrl\\(\"(https?://[^\\r\\n]+?)\"\\)\\}[^>]*>(.*?)</button>",
                       NSRegularExpressionDotMatchesLineSeparators,
                       ^NSString *(NSTextCheckingResult *match,NSString *text) {
-        NSString *url=CGRGroup(match,2,text);
-        NSString *label=CGRTrim(CGRGroup(match,3,text) ?: @"");
+        NSString *url=CGRGroup(match,1,text);
+        NSString *label=CGRTrim(CGRGroup(match,2,text) ?: @"");
         return CGRSafeRichLink(label.length?label:@"Open link",url);
     });
     output=CGRReplace(output,
                       @"<button\\b[^>]*onClick=\\{\\(\\)\\s*=>\\s*GenUI\\.openUrl\\(\"(https?://[^\\r\\n]+?)\"\\)\\}[^>]*>[ \\t\\r\\n]*([^\\r\\n<]+)",
                       0,^NSString *(NSTextCheckingResult *match,NSString *text) {
-        NSString *url=CGRGroup(match,2,text);
-        NSString *label=CGRTrim(CGRGroup(match,3,text) ?: @"");
+        NSString *url=CGRGroup(match,1,text);
+        NSString *label=CGRTrim(CGRGroup(match,2,text) ?: @"");
         return CGRSafeRichLink(label.length?label:@"Open link",url);
     });
     output=CGRReplace(output,@"<badge\\b[^>]*>(.*?)</badge>",
