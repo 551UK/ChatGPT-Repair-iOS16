@@ -30,3 +30,5 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tw
 - v56.6 (test): when leaving the history sidebar and returning to the same conversation without a native detail request, reselect that conversation using the existing guarded native selection bridge. Skips restores when another chat begins loading; leaves retry/download handling unchanged.
 
 - v56.7 (test): detects the history drawer by actual on-screen hit-testing instead of relying on viewDidDisappear, and reloads the unchanged selected conversation only when no native detail request starts. Also converts raw GenUI download buttons and badges into clean text/clickable links on the legacy renderer.
+
+- v56.8 (test): fixes the remaining sidebar-return blank by strongly retaining the dismissed HistoryViewController for 0.35s so its native selection closure/viewModel survives long enough to reload the same conversation. The sidebar diagnostic proved the controller is removed about 0.2s after close while the Messages collection remains at zero content size. Native detail requests still take precedence.

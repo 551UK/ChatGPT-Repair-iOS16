@@ -594,13 +594,16 @@ static void CGScheduleSidebarReturnRestore(UIViewController *controller,
                                            NSString *cid,
                                            NSUInteger serial,
                                            NSUInteger epoch) {
-    if (![[NSUUID alloc] initWithUUIDString:cid ?: @""]) return;
-    __weak UIViewController *weakController=controller;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.60*NSEC_PER_SEC)),
+    if (!controller || ![[NSUUID alloc] initWithUUIDString:cid ?: @""]) return;
+
+    // Keep the just-dismissed HistoryViewController alive until the restore fires.
+    // Diagnostic v1.0 proved ChatGPT removes/deallocates it ~0.2 s after the
+    // drawer closes; v56.7 used a weak capture and therefore lost the viewModel
+    // before it could call the native selection bridge.
+    UIViewController *owner=controller;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.35*NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        UIViewController *owner=weakController;
-        if (!owner || owner!=sHistoryController ||
-            UIApplication.sharedApplication.applicationState!=UIApplicationStateActive ||
+        if (UIApplication.sharedApplication.applicationState!=UIApplicationStateActive ||
             owner.presentedViewController || CGSidebarListIsTopmost(owner)) return;
 
         @synchronized([NSURLSession class]) {
