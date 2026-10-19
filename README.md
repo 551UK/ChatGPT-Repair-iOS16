@@ -27,8 +27,6 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tw
 
 - v56.5 converts unsupported rich layout markup (`<row>`, `<AsyncImage>`, `<Link>` and product price placeholders) into readable text with tappable URL tokens for older iOS clients. This does not add native rich cards or image query support.
 
-- v56.6 (test): when leaving the history sidebar and returning to the same conversation without a native detail request, reselect that conversation using the existing guarded native selection bridge. Skips restores when another chat begins loading; leaves retry/download handling unchanged.
+- v56.7 converts raw GenUI download buttons and badges into clean text/clickable links on the legacy renderer.
 
-- v56.7 (test): detects the history drawer by actual on-screen hit-testing instead of relying on viewDidDisappear, and reloads the unchanged selected conversation only when no native detail request starts. Also converts raw GenUI download buttons and badges into clean text/clickable links on the legacy renderer.
-
-- v56.8 (test): fixes the remaining sidebar-return blank by strongly retaining the dismissed HistoryViewController for 0.35s so its native selection closure/viewModel survives long enough to reload the same conversation. The sidebar diagnostic proved the controller is removed about 0.2s after close while the Messages collection remains at zero content size. Native detail requests still take precedence.
+- v56.8 fixes the sidebar-return blank-chat bug by snapshotting the selected conversation when the sidebar appears and synchronously reselecting that same conversation when the sidebar disappears, only when no different detail request has started. Earlier timer/hit-test/delayed-controller experiments were removed.
