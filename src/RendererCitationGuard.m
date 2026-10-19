@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
+#import "CitationCompat.h"
 
 static BOOL CGRIsMarkdownTextView(UITextView *view) {
     if (!view) return NO;
@@ -40,6 +41,27 @@ static NSString *CGRSanitizeRenderedCitationString(NSString *input) {
     return output;
 }
 
+static NSURL *CGRURLFromAttributes(NSDictionary<NSAttributedStringKey,id> *attrs) {
+    id direct=attrs[NSLinkAttributeName];
+    if ([direct isKindOfClass:NSURL.class]) return direct;
+    if ([direct isKindOfClass:NSString.class]) {
+        NSURL *url=[NSURL URLWithString:direct];
+        NSString *scheme=url.scheme.lowercaseString;
+        if ([scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"]) return url;
+    }
+    for (id value in attrs.allValues) {
+        if ([value isKindOfClass:NSURL.class]) {
+            NSURL *url=value;
+            NSString *scheme=url.scheme.lowercaseString;
+            if ([scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"]) return url;
+        }
+        if ([value isKindOfClass:NSString.class] &&
+            ([(NSString *)value hasPrefix:@"https://"] || [(NSString *)value hasPrefix:@"http://"]))
+            return [NSURL URLWithString:value];
+    }
+    return nil;
+}
+
 static NSAttributedString *CGRSanitizeRenderedCitationAttributedString(NSAttributedString *input) {
     if (![input isKindOfClass:NSAttributedString.class] || !input.length) return input;
     NSString *plain=input.string;
@@ -64,7 +86,17 @@ static NSAttributedString *CGRSanitizeRenderedCitationAttributedString(NSAttribu
                                          range:NSMakeRange(after,current.length-after)];
             if (end.location==NSNotFound) break;
             NSRange whole=NSMakeRange(start.location,NSMaxRange(end)-start.location);
-            [output replaceCharactersInRange:whole withString:fallback];
+            NSString *marker=[current substringWithRange:whole];
+
+            NSDictionary *base=whole.location<output.length
+                ?[output attributesAtIndex:whole.location effectiveRange:NULL]:@{};
+            NSURL *url=CGRCitationPrimaryURLForMarker(marker) ?: CGRURLFromAttributes(base);
+            NSMutableDictionary *attrs=[base mutableCopy] ?: [NSMutableDictionary dictionary];
+            if (url) attrs[NSLinkAttributeName]=url;
+
+            NSAttributedString *replacement=[[NSAttributedString alloc]
+                initWithString:fallback attributes:attrs];
+            [output replaceCharactersInRange:whole withAttributedString:replacement];
         }
     }
     return output;

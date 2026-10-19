@@ -17,3 +17,7 @@ assert '@selector(setText:)' in guard
 assert 'turn199783search' not in guard
 
 print("PASS: raw renderer citation markers are cleaned only in markdown text views")
+
+assert 'CGRCitationPrimaryURLForMarker(marker)' in guard
+assert 'CGRURLFromAttributes' in guard
+assert 'NSLinkAttributeName' in guard

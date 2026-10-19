@@ -127,6 +127,44 @@ static NSArray<NSURL *> *CGRURLsForReference(NSDictionary *reference) {
     return urls;
 }
 
+static NSObject *CGRCitationRegistryLock(void) {
+    static NSObject *lock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ lock=[NSObject new]; });
+    return lock;
+}
+
+static NSMutableDictionary<NSString *, NSURL *> *CGRCitationRegistry(void) {
+    static NSMutableDictionary<NSString *, NSURL *> *registry;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ registry=[NSMutableDictionary dictionary]; });
+    return registry;
+}
+
+NSURL *CGRCitationPrimaryURLForMarker(NSString *marker) {
+    if (![marker isKindOfClass:NSString.class] || !marker.length) return nil;
+    @synchronized(CGRCitationRegistryLock()) {
+        return CGRCitationRegistry()[marker];
+    }
+}
+
+static void CGRRememberCitationReference(NSDictionary *reference) {
+    if (![reference isKindOfClass:NSDictionary.class]) return;
+    NSString *matched=[reference[@"matched_text"] isKindOfClass:NSString.class]
+        ?reference[@"matched_text"]:nil;
+    if (!matched.length || !CGRIsCitationMarker(matched)) return;
+    NSURL *primary=CGRURLsForReference(reference).firstObject;
+    if (!primary) return;
+    @synchronized(CGRCitationRegistryLock()) {
+        CGRCitationRegistry()[matched]=primary;
+        if (CGRCitationRegistry().count>512) {
+            NSArray *keys=CGRCitationRegistry().allKeys;
+            NSUInteger remove=keys.count-384;
+            for (NSUInteger i=0;i<remove;i++) [CGRCitationRegistry() removeObjectForKey:keys[i]];
+        }
+    }
+}
+
 static NSString *CGRRichLinkToken(NSURL *url) {
     NSString *label=[NSString stringWithFormat:@"[%@]",CGRSafeLabelForURL(url)];
     // LinkFix.m already knows this modern rich URL token and turns it into
@@ -190,6 +228,9 @@ static BOOL CGRRewriteMessage(NSMutableDictionary *message) {
         ?metadata[@"content_references"]:nil;
     NSArray *parts=[content[@"parts"] isKindOfClass:NSArray.class]?content[@"parts"]:nil;
     if (!content || !parts.count) return NO;
+
+    for (id rawReference in references)
+        if ([rawReference isKindOfClass:NSDictionary.class]) CGRRememberCitationReference(rawReference);
 
     NSMutableArray *newParts=[parts mutableCopy];
     BOOL changed=NO;

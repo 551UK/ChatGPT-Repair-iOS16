@@ -25,6 +25,9 @@ int main(void) {
         NSCAssert([out rangeOfString:@"\uE200cite"].location==NSNotFound,@"raw cite leaked");
         NSCAssert([out rangeOfString:@"\uE200url\uE202[example.com]\uE202https://www.example.com/page\uE201"].location!=NSNotFound,@"citation not converted");
 
+        NSURL *remembered=CGRCitationPrimaryURLForMarker(cite);
+        NSCAssert([[remembered absoluteString] isEqualToString:@"https://www.example.com/page"],@"citation URL registry did not remember source");
+
         NSString *multi=@"\uE200cite\uE202turn0search1\uE202turn0search2\uE201";
         NSDictionary *root2=@{@"message":@{
             @"content":@{@"parts":@[multi]},
