@@ -32,7 +32,6 @@ static NSTimeInterval sLastRefresh = 0;
 static BOOL sNativeHookInstalled = NO;
 static IMP sOriginalLayout = NULL;
 static IMP sOriginalAppear = NULL;
-static IMP sOriginalDisappear = NULL;
 static IMP sOriginalScroll = NULL;
 static char kPinView, kPinAnchor, kRenderedPinSet;
 static NSString * const kUpdated = @"com.551uk.pins.updated";
@@ -226,6 +225,10 @@ static NSUInteger sSidebarEntryDetailSerial=0;
 static NSUInteger sSidebarEpoch=0;
 static BOOL sSidebarWasShown=NO;
 static NSTimeInterval sSidebarLastRestoreAt=0;
+static __weak UIViewController *sHistoryController;
+static dispatch_source_t sSidebarVisibilityTimer;
+static BOOL sSidebarVisibilityKnown=NO;
+static BOOL sSidebarActuallyVisible=NO;
 static NSUInteger CGDetailSelected(NSURLRequest *request) {
     NSString *cid=request.URL.path.lastPathComponent;
     @synchronized([NSURLSession class]) {
@@ -555,6 +558,130 @@ static NSString *CGSearchText(UIView *search) {
 }
 extern BOOL CG46OpenPin(UIViewController *, NSString *, NSString *);
 
+static BOOL CGViewDescendsFrom(UIView *view, UIView *ancestor) {
+    if (!view || !ancestor) return NO;
+    for (UIView *cursor=view; cursor; cursor=cursor.superview)
+        if (cursor==ancestor) return YES;
+    return NO;
+}
+
+static BOOL CGSidebarListIsTopmost(UIViewController *controller) {
+    if (!controller || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)
+        return NO;
+    UICollectionView *list=CGFindList(controller.view);
+    UIWindow *window=list.window ?: controller.view.window;
+    if (!list || !window || list.hidden || list.alpha<0.01) return NO;
+
+    CGRect rect=[list convertRect:list.bounds toView:window];
+    CGRect visible=CGRectIntersection(rect,window.bounds);
+    if (CGRectIsNull(visible) || CGRectIsEmpty(visible) ||
+        visible.size.width<60.0 || visible.size.height<100.0) return NO;
+
+    // Hit-test multiple points in the collection's actually visible rectangle.
+    // When ChatGPT's drawer is closed the history controller can remain mounted
+    // underneath the conversation, so view.window/viewDidDisappear are not enough.
+    const CGFloat fractions[]={0.22,0.50,0.78};
+    CGFloat x=CGRectGetMidX(visible);
+    for (NSUInteger i=0;i<sizeof(fractions)/sizeof(fractions[0]);i++) {
+        CGPoint point=CGPointMake(x,CGRectGetMinY(visible)+visible.size.height*fractions[i]);
+        UIView *hit=[window hitTest:point withEvent:nil];
+        if (CGViewDescendsFrom(hit,list)) return YES;
+    }
+    return NO;
+}
+
+static void CGScheduleSidebarReturnRestore(UIViewController *controller,
+                                           NSString *cid,
+                                           NSUInteger serial,
+                                           NSUInteger epoch) {
+    if (![[NSUUID alloc] initWithUUIDString:cid ?: @""]) return;
+    __weak UIViewController *weakController=controller;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.60*NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        UIViewController *owner=weakController;
+        if (!owner || owner!=sHistoryController ||
+            UIApplication.sharedApplication.applicationState!=UIApplicationStateActive ||
+            owner.presentedViewController || CGSidebarListIsTopmost(owner)) return;
+
+        @synchronized([NSURLSession class]) {
+            // A real selection/detail request always wins. Only repair the exact
+            // no-request return-to-same-chat case seen in the diagnostic logs.
+            if (sSidebarEpoch!=epoch || sDetailRequestSerial!=serial ||
+                ![sSelectedDetailID isEqualToString:cid]) return;
+            NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+            if (now-sSidebarLastRestoreAt<1.5) return;
+            sSidebarLastRestoreAt=now;
+        }
+        NSString *title=sHistoryTitles[cid] ?: @"Untitled conversation";
+        CG46OpenPin(owner,cid,title);
+    });
+}
+
+static void CGSidebarVisibilityTick(void) {
+    UIViewController *controller=sHistoryController;
+    if (!controller || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)
+        return;
+
+    BOOL visible=CGSidebarListIsTopmost(controller);
+    NSString *restoreID=nil;
+    NSUInteger restoreSerial=0,restoreEpoch=0;
+
+    @synchronized([NSURLSession class]) {
+        if (!sSidebarVisibilityKnown) {
+            sSidebarVisibilityKnown=YES;
+            sSidebarActuallyVisible=visible;
+            if (visible) {
+                sSidebarEntryConversationID=[sSelectedDetailID copy];
+                sSidebarEntryDetailSerial=sDetailRequestSerial;
+                sSidebarWasShown=YES;
+                sSidebarEpoch++;
+            }
+            return;
+        }
+        if (visible==sSidebarActuallyVisible) return;
+
+        sSidebarActuallyVisible=visible;
+        if (visible) {
+            sSidebarEntryConversationID=[sSelectedDetailID copy];
+            sSidebarEntryDetailSerial=sDetailRequestSerial;
+            sSidebarWasShown=YES;
+            sSidebarEpoch++;
+        } else if (sSidebarWasShown) {
+            restoreID=[sSidebarEntryConversationID copy];
+            restoreSerial=sSidebarEntryDetailSerial;
+            restoreEpoch=++sSidebarEpoch;
+            sSidebarWasShown=NO;
+        }
+    }
+    if (restoreID.length)
+        CGScheduleSidebarReturnRestore(controller,restoreID,restoreSerial,restoreEpoch);
+}
+
+static void CGTrackHistoryController(UIViewController *controller) {
+    if (!controller) return;
+    if (sHistoryController!=controller) {
+        @synchronized([NSURLSession class]) {
+            sHistoryController=controller;
+            sSidebarVisibilityKnown=NO;
+            sSidebarActuallyVisible=NO;
+            sSidebarWasShown=NO;
+            sSidebarEntryConversationID=nil;
+            sSidebarEpoch++;
+        }
+    }
+    if (!sSidebarVisibilityTimer) {
+        sSidebarVisibilityTimer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,
+                                                       dispatch_get_main_queue());
+        dispatch_source_set_timer(sSidebarVisibilityTimer,
+            dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.20*NSEC_PER_SEC)),
+            (uint64_t)(0.20*NSEC_PER_SEC),(uint64_t)(0.04*NSEC_PER_SEC));
+        dispatch_source_set_event_handler(sSidebarVisibilityTimer,^{
+            CGSidebarVisibilityTick();
+        });
+        dispatch_resume(sSidebarVisibilityTimer);
+    }
+}
+
 /*
  * Prefer the first date heading. If it is a SwiftUI-rendered collection
  * supplementary view, take its actual UIKit layout frame instead.
@@ -700,6 +827,8 @@ static void CGRender(id controller) {
 }
 static void CGHistoryLayout(id self, SEL command) {
     ((void(*)(id, SEL))sOriginalLayout)(self,command);
+    if ([self isKindOfClass:UIViewController.class])
+        CGTrackHistoryController((UIViewController *)self);
     CGRender(self);
 }
 static void CGHistoryScroll(id self, SEL command, UIScrollView *scroll) {
@@ -708,53 +837,10 @@ static void CGHistoryScroll(id self, SEL command, UIScrollView *scroll) {
 }
 static void CGHistoryAppear(id self, SEL command, BOOL animated) {
     ((void(*)(id, SEL, BOOL))sOriginalAppear)(self,command,animated);
-    // Remember which conversation was selected as the sidebar appeared.
-    // Returning to an unchanged SwiftUI selection can otherwise leave an
-    // empty view with no fresh /conversation/<id> request.
-    @synchronized([NSURLSession class]) {
-        sSidebarEntryConversationID=[sSelectedDetailID copy];
-        sSidebarEntryDetailSerial=sDetailRequestSerial;
-        sSidebarWasShown=YES;
-        sSidebarEpoch++;
-    }
+    if ([self isKindOfClass:UIViewController.class])
+        CGTrackHistoryController((UIViewController *)self);
     CGRefreshPins();
     CGRender(self);
-}
-static void CGHistoryDisappear(id self, SEL command, BOOL animated) {
-    __block NSString *cid=nil;
-    __block NSUInteger serial=0, epoch=0;
-    @synchronized([NSURLSession class]) {
-        if (sSidebarWasShown) {
-            cid=[sSidebarEntryConversationID copy];
-            serial=sSidebarEntryDetailSerial;
-            epoch=++sSidebarEpoch;
-            sSidebarWasShown=NO;
-        }
-    }
-    if (sOriginalDisappear)
-        ((void(*)(id,SEL,BOOL))sOriginalDisappear)(self,command,animated);
-    // Wait for native selection/navigation. If any chat detail request starts,
-    // never issue an extra selection and never interfere with the retry logic.
-    if (![[NSUUID alloc] initWithUUIDString:cid ?: @""]) return;
-    __weak UIViewController *weakController=(UIViewController *)self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.85*NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        UIViewController *owner=weakController;
-        if (!owner || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive ||
-            owner.presentedViewController) return;
-        @synchronized([NSURLSession class]) {
-            if (sSidebarEpoch!=epoch || sDetailRequestSerial!=serial ||
-                ![sSelectedDetailID isEqualToString:cid]) return;
-            NSTimeInterval now=NSDate.date.timeIntervalSince1970;
-            if (now-sSidebarLastRestoreAt<6.0) return;
-            sSidebarLastRestoreAt=now;
-        }
-        // Use the existing UUID-guarded native selection bridge, which sets
-        // conversationHasDetails=false and asks the app to load real content.
-        // No fabricated messages, cache deletion or direct model mutation.
-        NSString *title=sHistoryTitles[cid] ?: @"Untitled conversation";
-        CG46OpenPin(owner,cid,title);
-    });
 }
 static void CGInstallNativeHook(void) {
     if (sNativeHookInstalled) return;
@@ -762,8 +848,7 @@ static void CGInstallNativeHook(void) {
     if (!cls) {  return; }
     Method layout = class_getInstanceMethod(cls,@selector(viewDidLayoutSubviews));
     Method appear = class_getInstanceMethod(cls,@selector(viewDidAppear:));
-    Method disappear = class_getInstanceMethod(cls,@selector(viewDidDisappear:));
-    if (!layout || !appear || !disappear) {  return; }
+    if (!layout || !appear) {  return; }
     Method scroll=class_getInstanceMethod(cls,@selector(scrollViewDidScroll:));
     if (scroll) {
         sOriginalScroll=method_getImplementation(scroll);
@@ -772,13 +857,10 @@ static void CGInstallNativeHook(void) {
     }
     sOriginalLayout = method_getImplementation(layout);
     sOriginalAppear = method_getImplementation(appear);
-    sOriginalDisappear = method_getImplementation(disappear);
     class_replaceMethod(cls,@selector(viewDidLayoutSubviews),
         (IMP)CGHistoryLayout,method_getTypeEncoding(layout));
     class_replaceMethod(cls,@selector(viewDidAppear:),
         (IMP)CGHistoryAppear,method_getTypeEncoding(appear));
-    class_replaceMethod(cls,@selector(viewDidDisappear:),
-        (IMP)CGHistoryDisappear,method_getTypeEncoding(disappear));
     SEL one=@selector(collectionView:contextMenuConfigurationForItemAtIndexPath:point:);
     SEL many=@selector(collectionView:contextMenuConfigurationForItemsAtIndexPaths:point:);
     Method m=class_getInstanceMethod(cls,one);
