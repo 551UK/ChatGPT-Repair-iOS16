@@ -218,10 +218,10 @@ jobs:
           keep="ChatGPTRepair_56.8_iphoneos-arm64.deb"
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
             --jq '.[] | [.id, .tag_name] | @tsv' |
-          while IFS=\t' read -r release_id tag; do
+          while read -r release_id tag; do
             gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" \
               --jq '.[] | select(.name | endswith(".deb")) | [.id, .name] | @tsv' |
-            while IFS=\t' read -r asset_id name; do
+            while read -r asset_id name; do
               [ -n "$asset_id" ] || continue
               if [ "$name" != "$keep" ]; then
                 echo "Deleting old DEB asset: $tag / $name"
