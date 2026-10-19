@@ -42,6 +42,7 @@ jobs:
           python3 tests/check_clean_release.py
           python3 tests/check_history_refresh.py
           python3 tests/check_sidebar_restore.py
+          python3 tests/check_renderer_citation_guard.py
           clang -fobjc-arc -fblocks -framework Foundation             src/HistoryOriginMerge.m tests/HistoryOriginMergeTests.m             -o "$RUNNER_TEMP/HistoryOriginMergeTests"
           "$RUNNER_TEMP/HistoryOriginMergeTests"
           clang -fobjc-arc -fblocks -framework Foundation             src/CitationCompat.m src/RichMarkupCompat.m tests/CitationCompatTests.m             -o "$RUNNER_TEMP/CitationCompatTests"
