@@ -34,3 +34,5 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tw
 - v56.9 moves the same-chat sidebar reload before the app's original `viewDidDisappear:` runs, because the diagnostic showed the HistoryViewController is detached and its native selection closure is unusable immediately afterwards.
 
 - v57.0 protects the active conversation at the successful sidebar-history refresh event, reasserting the same native selection without an arbitrary timer.
+
+- v57.1 repairs the exact loaded-to-zero message collection state after sidebar history refresh, without timer polling.

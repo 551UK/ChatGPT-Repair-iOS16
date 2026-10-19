@@ -44,6 +44,9 @@ static NSMutableDictionary<NSString *, NSString *> *sHistoryTitles;
 static NSString *sMenuID, *sMenuTitle;
 static __weak UIViewController *sMenuOwner;
 static __weak UIViewController *sVisibleHistoryController;
+static BOOL sSidebarHistoryRefreshArmed=NO;
+static BOOL sSidebarObservedLoadedMessages=NO;
+static BOOL sSidebarCollapseRepairIssued=NO;
 extern BOOL CG46OpenPin(UIViewController *, NSString *, NSString *);
 static void CGRender(id controller);
 static void CGRefreshPins(void);
@@ -231,6 +234,8 @@ static NSUInteger CGDetailSelected(NSURLRequest *request) {
     @synchronized([NSURLSession class]) {
         // Distinguish a native request for the same chat from a no-op sidebar return.
         sDetailRequestSerial++;
+        sSidebarHistoryRefreshArmed=NO;
+        sSidebarCollapseRepairIssued=NO;
         if (![sSelectedDetailID isEqualToString:cid]) {
             sSelectedDetailID=[cid copy];
             sSelectedDetailGeneration++;
@@ -243,31 +248,6 @@ static BOOL CGDetailStillSelected(NSString *cid, NSUInteger generation) {
         return [sSelectedDetailID isEqualToString:cid] &&
             sSelectedDetailGeneration==generation;
     }
-}
-static void CGRestoreSelectedAfterHistoryRefresh(void) {
-    NSString *cid=nil;
-    NSUInteger serial=0;
-    UIViewController *controller=sVisibleHistoryController;
-    @synchronized([NSURLSession class]) {
-        cid=[sSelectedDetailID copy];
-        serial=sDetailRequestSerial;
-    }
-    if (!controller || !controller.view.window ||
-        UIApplication.sharedApplication.applicationState!=UIApplicationStateActive ||
-        ![[NSUUID alloc] initWithUUIDString:cid ?: @""]) return;
-
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIViewController *owner=sVisibleHistoryController;
-        if (!owner || !owner.view.window ||
-            UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)
-            return;
-        @synchronized([NSURLSession class]) {
-            if (sDetailRequestSerial!=serial ||
-                ![sSelectedDetailID isEqualToString:cid]) return;
-        }
-        NSString *title=sHistoryTitles[cid] ?: @"Untitled conversation";
-        CG46OpenPin(owner,cid,title);
-    });
 }
 static void CGDetailFinishCancelled(void (^completion)(NSData *,NSURLResponse *,NSError *)) {
     if (completion) completion(nil,nil,
@@ -466,7 +446,17 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
                             BOOL successful=!combinedError && historyStatus>=200 && historyStatus<300;
                             if (successful) CGRememberHistory(combined);
                             originalForward(combined,combinedResponse,combinedError);
-                            if (successful) CGRestoreSelectedAfterHistoryRefresh();
+                            if (successful) {
+                                @synchronized([NSURLSession class]) {
+                                    if (sVisibleHistoryController &&
+                                        sSidebarEntryConversationID.length &&
+                                        sSidebarEntryDetailSerial==sDetailRequestSerial &&
+                                        [sSelectedDetailID isEqualToString:sSidebarEntryConversationID]) {
+                                        sSidebarHistoryRefreshArmed=YES;
+                                        sSidebarCollapseRepairIssued=NO;
+                                    }
+                                }
+                            }
                         });
                 });
         };
@@ -725,9 +715,70 @@ static void CGRender(id controller) {
     pinned.frame=CGRectMake(0,anchor,list.bounds.size.width,height>0?height-8:0);
     [list bringSubviewToFront:pinned];
 }
+static UICollectionView *CGFindMessageCollection(UIView *root) {
+    if (!root) return nil;
+    if ([root isKindOfClass:UICollectionView.class] &&
+        [NSStringFromClass(root.class) containsString:@"BottomAlignedCollectionViewController"])
+        return (UICollectionView *)root;
+    for (UIView *sub in root.subviews) {
+        UICollectionView *found=CGFindMessageCollection(sub);
+        if (found) return found;
+    }
+    return nil;
+}
+static UICollectionView *CGCurrentMessageCollection(void) {
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        UIViewController *root=window.rootViewController;
+        if (!root || !root.isViewLoaded) continue;
+        UICollectionView *found=CGFindMessageCollection(root.view);
+        if (found) return found;
+    }
+    return nil;
+}
+static void CGRepairCollapsedChatIfNeeded(UIViewController *owner) {
+    if (!NSThread.isMainThread || !owner || !owner.view.window) return;
+    UICollectionView *messages=CGCurrentMessageCollection();
+    if (!messages) return;
+
+    CGFloat height=messages.contentSize.height;
+    if (height>1.0) {
+        sSidebarObservedLoadedMessages=YES;
+        return;
+    }
+
+    NSString *cid=nil;
+    NSUInteger serial=0;
+    BOOL repair=NO;
+    @synchronized([NSURLSession class]) {
+        cid=[sSidebarEntryConversationID copy];
+        serial=sSidebarEntryDetailSerial;
+        repair=sSidebarObservedLoadedMessages &&
+            sSidebarHistoryRefreshArmed &&
+            !sSidebarCollapseRepairIssued &&
+            sDetailRequestSerial==serial &&
+            [sSelectedDetailID isEqualToString:cid];
+        if (repair) {
+            sSidebarHistoryRefreshArmed=NO;
+            sSidebarCollapseRepairIssued=YES;
+        }
+    }
+    if (!repair || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive ||
+        ![[NSUUID alloc] initWithUUIDString:cid ?: @""]) return;
+
+    NSString *title=sHistoryTitles[cid] ?: @"Untitled conversation";
+    if (!CG46OpenPin(owner,cid,title)) {
+        @synchronized([NSURLSession class]) {
+            if (sDetailRequestSerial==serial &&
+                [sSelectedDetailID isEqualToString:cid])
+                sSidebarCollapseRepairIssued=NO;
+        }
+    }
+}
 static void CGHistoryLayout(id self, SEL command) {
     ((void(*)(id, SEL))sOriginalLayout)(self,command);
     CGRender(self);
+    if ([self isKindOfClass:UIViewController.class])
+        CGRepairCollapsedChatIfNeeded((UIViewController *)self);
 }
 static void CGHistoryScroll(id self, SEL command, UIScrollView *scroll) {
     if (sOriginalScroll) ((void(*)(id,SEL,UIScrollView *))sOriginalScroll)(self,command,scroll);
@@ -737,9 +788,13 @@ static void CGHistoryAppear(id self, SEL command, BOOL animated) {
     ((void(*)(id, SEL, BOOL))sOriginalAppear)(self,command,animated);
     if ([self isKindOfClass:UIViewController.class])
         sVisibleHistoryController=(UIViewController *)self;
+    UICollectionView *messages=CGCurrentMessageCollection();
     @synchronized([NSURLSession class]) {
         sSidebarEntryConversationID=[sSelectedDetailID copy];
         sSidebarEntryDetailSerial=sDetailRequestSerial;
+        sSidebarHistoryRefreshArmed=NO;
+        sSidebarCollapseRepairIssued=NO;
+        sSidebarObservedLoadedMessages=messages.contentSize.height>1.0;
     }
     CGRefreshPins();
     CGRender(self);
@@ -753,6 +808,9 @@ static void CGHistoryDisappear(id self, SEL command, BOOL animated) {
         cid=[sSidebarEntryConversationID copy];
         serial=sSidebarEntryDetailSerial;
         sSidebarEntryConversationID=nil;
+        sSidebarHistoryRefreshArmed=NO;
+        sSidebarCollapseRepairIssued=NO;
+        sSidebarObservedLoadedMessages=NO;
     }
 
     // Reload while HistoryViewController still owns its HistoryViewModel.
