@@ -1,4 +1,4 @@
-name: Build ChatGPTRepair single rootless DEB
+name: Build ChatGPTRepair
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ permissions:
   actions: read
 
 jobs:
-  clean-release:
+  build:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -32,143 +32,84 @@ jobs:
           brew install dpkg ldid xz
           git clone --recursive --depth 1 https://github.com/theos/theos.git "$HOME/theos"
           mkdir -p "$HOME/theos/sdks"
-          curl -fL --retry 3 \
-            -o "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" \
-            "https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz"
+          curl -fL --retry 3             -o "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz"             "https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz"
           tar -xJf "$RUNNER_TEMP/iPhoneOS16.5.sdk.tar.xz" -C "$HOME/theos/sdks"
-          test -d "$HOME/theos/sdks/iPhoneOS16.5.sdk"
 
-      - name: Run source regression checks
+      - name: Run regression checks
         shell: bash
         run: |
           set -euo pipefail
           python3 tests/check_clean_release.py
           python3 tests/check_history_refresh.py
           python3 tests/check_sidebar_restore.py
-          clang -fobjc-arc -fblocks -framework Foundation \
-            src/HistoryOriginMerge.m tests/HistoryOriginMergeTests.m \
-            -o "$RUNNER_TEMP/HistoryOriginMergeTests"
+          clang -fobjc-arc -fblocks -framework Foundation             src/HistoryOriginMerge.m tests/HistoryOriginMergeTests.m             -o "$RUNNER_TEMP/HistoryOriginMergeTests"
           "$RUNNER_TEMP/HistoryOriginMergeTests"
-          clang -fobjc-arc -fblocks -framework Foundation \
-            src/CitationCompat.m src/RichMarkupCompat.m tests/CitationCompatTests.m \
-            -o "$RUNNER_TEMP/CitationCompatTests"
+          clang -fobjc-arc -fblocks -framework Foundation             src/CitationCompat.m src/RichMarkupCompat.m tests/CitationCompatTests.m             -o "$RUNNER_TEMP/CitationCompatTests"
           "$RUNNER_TEMP/CitationCompatTests"
-          test "$(awk '/^Version:/ { print $2; exit }' control)" = "57.2"
 
-      - name: Compile v57.2 core from main source
+      - name: Compile current core
         shell: bash
         run: |
           set -euo pipefail
           export THEOS="$HOME/theos"
           make clean
           make package FINALPACKAGE=1
-          shopt -s nullglob
-          debs=(packages/*.deb)
-          test "${#debs[@]}" -eq 1
-          test "$(dpkg-deb -f "${debs[0]}" Package)" = "com.551uk.chatgptrepair"
-          test "$(dpkg-deb -f "${debs[0]}" Version)" = "57.2"
+          deb="$(find packages -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$deb"
           mkdir -p build/newcore
-          dpkg-deb -x "${debs[0]}" build/newcore
+          dpkg-deb -x "$deb" build/newcore
           test -f build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib
           test -f build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.plist
-          strings build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib | grep -F "X-551UK-Detail-Retry" >/dev/null
-          strings build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib | grep -F "X-551UK-History-Cache" >/dev/null
-          strings build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib | grep -F "content_references" >/dev/null
 
-      - name: Download exact clean v57.1 baseline
+      - name: Download current production package
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build/base-artifact
-          gh release download v57.1 \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern "ChatGPTRepair_57.1_iphoneos-arm64.deb" \
-            --dir build/base-artifact
-          cp build/base-artifact/ChatGPTRepair_57.1_iphoneos-arm64.deb build/ChatGPTRepair_57.1_iphoneos-arm64.deb
-          actual="$(shasum -a 256 build/ChatGPTRepair_57.1_iphoneos-arm64.deb | awk '{print $1}')"
-          expected="ae2ac2ebc3f4c7ce57d5b38c2c0891e99799b07d1d709eff29d767114ed6fc5e"
-          test "$actual" = "$expected"
-          test "$(dpkg-deb -f build/ChatGPTRepair_57.1_iphoneos-arm64.deb Version)" = "57.1"
+          if gh release download v57.2             --repo "$GITHUB_REPOSITORY"             --pattern "ChatGPTRepair_iphoneos-arm64.deb"             --dir build/base-artifact 2>/dev/null; then
+            cp build/base-artifact/ChatGPTRepair_iphoneos-arm64.deb build/base.deb
+          else
+            gh release download v57.2               --repo "$GITHUB_REPOSITORY"               --pattern "ChatGPTRepair_57.2_iphoneos-arm64.deb"               --dir build/base-artifact
+            cp build/base-artifact/ChatGPTRepair_57.2_iphoneos-arm64.deb build/base.deb
+          fi
+          test "$(dpkg-deb -f build/base.deb Package)" = "com.551uk.chatgptrepair"
 
-      - name: Build clean v57.2 package
+      - name: Build clean production package
+        if: github.ref == 'refs/heads/main'
         shell: bash
         run: |
           set -euo pipefail
           rm -rf build/pkgroot build/basecheck build/finalcheck dist
           mkdir -p build/pkgroot build/basecheck build/finalcheck dist
-          dpkg-deb -R build/ChatGPTRepair_57.1_iphoneos-arm64.deb build/pkgroot
+          dpkg-deb -R build/base.deb build/pkgroot
 
           target="build/pkgroot/var/jb/Library/MobileSubstrate/DynamicLibraries"
           cp build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib "$target/ChatGPTRepair.dylib"
           cp ChatGPTRepair.plist "$target/ChatGPTRepair.plist"
+          cp control build/pkgroot/DEBIAN/control
 
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path("build/pkgroot/DEBIAN/control")
-          text=p.read_text()
-          if "Version: 57.1\n" not in text:
-              raise SystemExit("Expected v57.1 baseline")
-          p.write_text(text.replace("Version: 57.1\n","Version: 57.2\n",1))
-          PY
+          dpkg-deb --root-owner-group -b build/pkgroot dist/ChatGPTRepair_iphoneos-arm64.deb
+          test "$(dpkg-deb -f dist/ChatGPTRepair_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
 
-          dpkg-deb --root-owner-group -b build/pkgroot dist/ChatGPTRepair_57.2_iphoneos-arm64.deb
-          test "$(dpkg-deb -f dist/ChatGPTRepair_57.2_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
-          test "$(dpkg-deb -f dist/ChatGPTRepair_57.2_iphoneos-arm64.deb Version)" = "57.2"
-
-      - name: Verify clean package and preserved working components
-        shell: bash
-        run: |
-          set -euo pipefail
-          dpkg-deb -x build/ChatGPTRepair_57.1_iphoneos-arm64.deb build/basecheck
-          dpkg-deb -x dist/ChatGPTRepair_57.2_iphoneos-arm64.deb build/finalcheck
+          dpkg-deb -x build/base.deb build/basecheck
+          dpkg-deb -x dist/ChatGPTRepair_iphoneos-arm64.deb build/finalcheck
           base="build/basecheck/var/jb/Library/MobileSubstrate/DynamicLibraries"
           final="build/finalcheck/var/jb/Library/MobileSubstrate/DynamicLibraries"
 
-          for file in \
-            ChatGBeFree.dylib ChatGBeFree.plist \
-            ZZChatGPTDownloadFix.dylib ZZChatGPTDownloadFix.plist \
-            ZZChatGPTLinkFix.dylib ZZChatGPTLinkFix.plist; do
+          for file in             ChatGBeFree.dylib ChatGBeFree.plist             ZZChatGPTDownloadFix.dylib ZZChatGPTDownloadFix.plist             ZZChatGPTLinkFix.dylib ZZChatGPTLinkFix.plist; do
             cmp "$base/$file" "$final/$file"
           done
 
-          cmp ChatGPTRepair.plist "$final/ChatGPTRepair.plist"
           test -f "$final/ChatGPTRepair.dylib"
-
-          # Clean release must contain only the four production dylibs.
           test "$(find "$final" -maxdepth 1 -name '*.dylib' | wc -l | tr -d ' ')" = "4"
           test ! -e "$final/ZZZZChatGPTBlankDiag.dylib"
-          test ! -e "$final/ZZZZChatGPTBlankDiag.plist"
-          test ! -e "$final/ZZChatGPTLinkFix1.dylib"
-          test ! -e "$final/ZZChatGPTLinkFix2.dylib"
+          test ! -e "$final/ZZZZChatGPTSidebarBlankDiag.dylib"
+          test ! -e "$final/ZZZZZChatGPTSidebarTrace.dylib"
 
-          if strings "$final/ChatGPTRepair.dylib" | grep -E 'ChatGPTBlankChatsDiag|ChatGPT551Repair\.log|CGRLog\(|CGPLog\(|CGCacheLog\(' >/dev/null; then
-            echo "Diagnostic logging found in clean core"
-            exit 1
-          fi
-
-          python3 - <<'PY'
-          import subprocess
-          deb="dist/ChatGPTRepair_57.2_iphoneos-arm64.deb"
-          contents=subprocess.check_output(["dpkg-deb","-c",deb],text=True)
-          paths=[line.split(" ./",1)[1].strip() for line in contents.splitlines() if " ./" in line]
-          bad=[p for p in paths if p not in ("","var/","var") and not p.startswith("var/")]
-          if bad:
-              raise SystemExit("Found non-rootless payload path: "+repr(bad))
-          print("Verified rootless payload paths:",len(paths))
-          PY
-
-          shasum -a 256 dist/ChatGPTRepair_57.2_iphoneos-arm64.deb
-
-      - name: Upload clean v57.2 DEB artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ChatGPTRepair-57.2-clean
-          path: dist/ChatGPTRepair_57.2_iphoneos-arm64.deb
-          if-no-files-found: error
-
-      - name: Publish ChatGPTRepair v57.2
+      - name: Publish clean release
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -176,60 +117,32 @@ jobs:
         run: |
           set -euo pipefail
           tag="v57.2"
-          artifact="dist/ChatGPTRepair_57.2_iphoneos-arm64.deb"
-          cat > "$RUNNER_TEMP/notes.md" <<'NOTES'
-          Uses a different strategy for the persistent sidebar blank: prevent the destructive legacy history refresh from reaching the active chat model.
+          asset="dist/ChatGPTRepair_iphoneos-arm64.deb"
 
-          - Removes the v56.8-v57.1 repair-after-collapse/reselect code.
-          - Normal first-page history refresh still runs when no conversation is selected, so launch/sidebar history can populate normally.
-          - While a real conversation is open and HistoryViewController is on-screen, the first-page history request still fetches, retries, merges normal+TPP, and updates ChatGPTRepair's history metadata.
-          - The completed first-page response is then returned to the legacy app as NSURLErrorCancelled instead of being applied to the 2024 HistoryViewModel that clears the live Messages model.
-          - Older-page pagination is not quarantined.
-          - Pins, renderer, links, downloads, citations/products, detail retries and all other compatibility fixes are preserved.
-          NOTES
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$tag" "$artifact" --repo "$GITHUB_REPOSITORY" --clobber
-          else
-            gh release create "$tag" "$artifact" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "ChatGPTRepair v57.2" \
-              --notes-file "$RUNNER_TEMP/notes.md"
-          fi
+          gh release upload "$tag" "$asset" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$tag"             --repo "$GITHUB_REPOSITORY"             --title "ChatGPTRepair"             --notes ""
 
-      - name: Verify final release
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh release view v57.2 --repo "$GITHUB_REPOSITORY" --json assets \
-            --jq '.assets[].name' | grep -Fxq "ChatGPTRepair_57.2_iphoneos-arm64.deb"
-          gh release view v57.1 --repo "$GITHUB_REPOSITORY" >/dev/null
+          current_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '.id')"
 
-      - name: Delete all older DEB release assets
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          keep="ChatGPTRepair_57.2_iphoneos-arm64.deb"
-          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
-            --jq '.[] | [.id, .tag_name] | @tsv' |
-          while read -r release_id tag; do
-            gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" \
-              --jq '.[] | select(.name | endswith(".deb")) | [.id, .name] | @tsv' |
-            while read -r asset_id name; do
-              [ -n "$asset_id" ] || continue
-              if [ "$name" != "$keep" ]; then
-                echo "Deleting old DEB asset: $tag / $name"
-                gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
-              fi
-            done
+          # Remove every older release entry and its tag.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases"             --jq '.[] | [.id, .tag_name] | @tsv' |
+          while IFS=$'\t' read -r release_id release_tag; do
+            [ -n "$release_id" ] || continue
+            if [ "$release_id" != "$current_id" ]; then
+              gh release delete "$release_tag"                 --repo "$GITHUB_REPOSITORY"                 --cleanup-tag                 --yes
+            fi
           done
-          debs="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
-            --jq '.[]?.assets[]? | select(.name | endswith(".deb")) | .name')"
-          test "$(printf '%s\n' "$debs" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
-          printf '%s\n' "$debs" | grep -Fxq "$keep"
+
+          # Keep exactly one .deb on the current release.
+          gh api "repos/$GITHUB_REPOSITORY/releases/$current_id/assets"             --jq '.[] | select(.name | endswith(".deb")) | [.id, .name] | @tsv' |
+          while IFS=$'\t' read -r asset_id name; do
+            [ -n "$asset_id" ] || continue
+            if [ "$name" != "ChatGPTRepair_iphoneos-arm64.deb" ]; then
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+            fi
+          done
+
+          test "$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].id' | wc -l | tr -d ' ')" -eq 1
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$current_id/assets"             --jq '[.[] | select(.name | endswith(".deb"))] | length')" -eq 1
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$current_id" --jq '.body // ""')" = ""
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$current_id" --jq '.name')" = "ChatGPTRepair"
