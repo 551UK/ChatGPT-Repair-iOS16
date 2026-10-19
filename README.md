@@ -36,3 +36,5 @@ Restores missing features to the older ChatGPT app on jailbroken iOS 16. This tw
 - v57.0 protects the active conversation at the successful sidebar-history refresh event, reasserting the same native selection without an arbitrary timer.
 
 - v57.1 repairs the exact loaded-to-zero message collection state after sidebar history refresh, without timer polling.
+
+- v57.2 replaces the failed sidebar reload attempts with a history-quarantine approach: when a conversation is open, the legacy app is prevented from applying the destructive automatic first-page sidebar refresh, while ChatGPTRepair still fetches/merges it for its own metadata.

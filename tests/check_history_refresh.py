@@ -63,8 +63,14 @@ assert 'X-551UK-History-Retry' in pins
 
 print("PASS: cached 429 fallback, TPP merge retry, detail retry, and existing pin/history behaviour")
 
-
-assert 'sSidebarHistoryRefreshArmed=YES' in pins
-assert 'CGRepairCollapsedChatIfNeeded' in pins
+# Different approach for the sidebar blank: the legacy first-page history
+# completion is quarantined while a real conversation and History VC are live.
+assert 'CGHistoryFirstPage' in pins
+assert 'CGShouldQuarantineActiveHistory' in pins
+assert 'Legacy sidebar first-page refresh quarantined while conversation is open' in pins
+assert 'originalForward(nil,nil,historyCancelled);' in pins
 history_completion=pins[pins.index('CGOriginMergePage(historyConfig'):pins.index('// Resolve modern web citation markers')]
-assert history_completion.index('originalForward(combined,combinedResponse,combinedError);') < history_completion.index('sSidebarHistoryRefreshArmed=YES')
+assert history_completion.index('CGRememberHistory(combined)') < history_completion.index('CGShouldQuarantineActiveHistory(request)')
+assert history_completion.index('CGShouldQuarantineActiveHistory(request)') < history_completion.index('originalForward(combined,combinedResponse,combinedError);')
+assert 'sSidebarHistoryRefreshArmed' not in pins
+assert 'CGRepairCollapsedChatIfNeeded' not in pins
