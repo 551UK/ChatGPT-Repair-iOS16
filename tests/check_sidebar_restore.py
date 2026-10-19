@@ -30,4 +30,4 @@ assert "0.35*NSEC_PER_SEC" not in source
 assert "0.60*NSEC_PER_SEC" not in source
 assert "0.85*NSEC_PER_SEC" not in source
 
-print("PASS: sidebar blank repair uses direct viewDidDisappear reselection and obsolete timer/delayed-owner attempts are removed")
+print("PASS: final sidebar repair is direct lifecycle reselection only; obsolete polling and delayed-owner code is absent")
