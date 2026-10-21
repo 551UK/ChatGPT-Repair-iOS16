@@ -1,5 +1,4 @@
 #import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -14,8 +13,5 @@ void CGConversationPagingProcessDetailResponse(
     NSURLResponse * _Nullable response,
     NSError * _Nullable error,
     void (^completion)(NSData * _Nullable, NSURLResponse * _Nullable, NSError * _Nullable));
-
-void CGConversationPagingHandleMessageScroll(UIScrollView *scrollView);
-void CGConversationPagingInstallScrollHook(void);
 
 NS_ASSUME_NONNULL_END
