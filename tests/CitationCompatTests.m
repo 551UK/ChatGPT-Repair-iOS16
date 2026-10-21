@@ -1,3 +1,4 @@
+// ChatGPTRepair: Regression tests for citation, products and linked markdown.
 #import <Foundation/Foundation.h>
 #import "../src/CitationCompat.h"
 

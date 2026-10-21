@@ -1,3 +1,4 @@
+# ChatGPTRepair: Guard against disappearing history and rate limit regressions.
 """Offline regression checks for history refresh and HTTP 429 handling."""
 from pathlib import Path
 

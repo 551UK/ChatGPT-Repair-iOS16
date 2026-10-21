@@ -1,3 +1,4 @@
+# ChatGPTRepair: Verify clean source-only packaging and functional hooks.
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 main=["CitationCompat.m","HistoryIsolation.m","HistoryPageCache.m","PinnedSidebarIntegration.m","DirectPinSelection.m","DownloadFix.m","LinkFix.m"]

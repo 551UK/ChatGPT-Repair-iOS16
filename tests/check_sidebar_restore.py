@@ -1,3 +1,4 @@
+# ChatGPTRepair: Verify active chat preservation when opening the sidebar.
 from pathlib import Path
 
 source=(Path(__file__).resolve().parents[1]/"src/PinnedSidebarIntegration.m").read_text()

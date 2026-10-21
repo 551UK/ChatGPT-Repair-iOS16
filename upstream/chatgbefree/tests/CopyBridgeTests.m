@@ -1,3 +1,4 @@
+// ChatGPTRepair: Test copy normalization and Unicode preservation.
 #import <Foundation/Foundation.h>
 
 #import "../CopyBridge/LegacyCopyBridge.h"

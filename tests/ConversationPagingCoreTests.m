@@ -1,3 +1,4 @@
+// ChatGPTRepair: Regression tests for older conversation-page assembly.
 #import <Foundation/Foundation.h>
 #import "../src/ConversationPagingCore.h"
 

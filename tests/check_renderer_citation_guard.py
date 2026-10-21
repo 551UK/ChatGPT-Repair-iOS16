@@ -1,3 +1,4 @@
+# ChatGPTRepair: Guard against malformed citation rendering.
 from pathlib import Path
 
 root=Path(__file__).resolve().parents[1]

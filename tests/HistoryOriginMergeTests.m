@@ -1,3 +1,4 @@
+// ChatGPTRepair: Regression tests for historical chat merging.
 #import <Foundation/Foundation.h>
 #import "../src/HistoryOriginMerge.h"
 

@@ -1,3 +1,4 @@
+// ChatGPTRepair: Test generated image history and Sediment link handling.
 #import <Foundation/Foundation.h>
 
 #import "../ImageBridge/LegacyImageBridge.h"

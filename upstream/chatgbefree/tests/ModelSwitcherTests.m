@@ -1,3 +1,4 @@
+// ChatGPTRepair: Test account models and thinking effort translation.
 #import <Foundation/Foundation.h>
 
 #import "../ModelSwitcher/LegacyModelSwitcher.h"
