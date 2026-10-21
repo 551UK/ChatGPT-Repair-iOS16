@@ -1,3 +1,4 @@
+// ChatGPTRepair: Assemble older conversation pages into the legacy message mapping.
 #import "ConversationPagingCore.h"
 
 static NSDictionary *CGPagingMessageObject(id raw) {

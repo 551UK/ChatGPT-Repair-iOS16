@@ -1,3 +1,4 @@
+// ChatGPTRepair: Fetch historical pages and merge complete conversations.
 #import "ConversationPagingCompat.h"
 #import "ConversationPagingState.h"
 #import "ConversationPagingCore.h"

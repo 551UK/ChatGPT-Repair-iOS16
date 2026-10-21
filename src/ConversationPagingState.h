@@ -1,3 +1,4 @@
+// ChatGPTRepair: Conversation-page loading state declarations.
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN

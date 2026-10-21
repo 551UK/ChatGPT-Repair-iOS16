@@ -1,3 +1,4 @@
+// ChatGPTRepair: Manage conversation paging requests and selection state.
 #import "ConversationPagingState.h"
 #include <math.h>
 
