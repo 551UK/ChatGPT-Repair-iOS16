@@ -220,6 +220,30 @@ int main(void) {
         NSCAssert([downloadRowOut containsString:@"\uE200url\uE202↓ Download CallBar Lock Screen Diagnostic DEB\uE202https://github.com/551UK/CallBar-IOS16/releases/download/callbar-lockdiag-4/com.551uk.callbarlockdiag_1.0-1_iphoneos-arm64.deb\uE201"],
                   @"download row was not converted to one tappable legacy link");
 
+
+        // Screenshot regressions: modern entity and image_group UI markers
+        // must not expose their private-use wrapper or JSON in the old app.
+        NSString *entity=@"\uE200entity\uE202[\"brand\",\"Zable\",\"UK credit card provider\"]\uE201";
+        NSDictionary *entityRoot=@{@"message":@{
+            @"content":@{@"parts":@[[@"Card: " stringByAppendingString:entity]]},
+            @"metadata":@{}
+        }};
+        NSString *entityOut=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(entityRoot))));
+        NSCAssert(![entityOut containsString:@"\uE200entity"],@"Zable entity marker leaked");
+        NSCAssert(![entityOut containsString:@"[\"brand\""],@"Zable entity JSON leaked");
+        NSCAssert([entityOut containsString:@"Card: Zable"],@"Zable display name was lost");
+
+        NSString *imageGroup=@"\uE200image_group\uE202{\"query\":[\"MoneySavingExpert UK logo\"],\"aspect_ratio\":\"5:3\",\"layout\":\"carousel\",\"num_per_query\":1}\uE201";
+        NSDictionary *imageGroupRoot=@{@"message":@{
+            @"content":@{@"parts":@[imageGroup]},
+            @"metadata":@{}
+        }};
+        NSString *imageGroupOut=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(imageGroupRoot))));
+        NSCAssert(![imageGroupOut containsString:@"\uE200image_group"],@"image_group marker leaked");
+        NSCAssert(![imageGroupOut containsString:@"num_per_query"],@"image_group JSON leaked");
+        NSCAssert([imageGroupOut isEqualToString:@"[Image: MoneySavingExpert UK logo]"],
+                  @"image_group did not degrade cleanly");
+
         NSLog(@"PASS: citations compact cleanly, product markers render cleanly, and normal download links stay intact");
     }
     return 0;
