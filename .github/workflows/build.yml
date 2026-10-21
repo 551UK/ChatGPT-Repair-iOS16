@@ -189,11 +189,46 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release upload v57.2 dist/ChatGPTRepair_iphoneos-arm64.deb \
+
+          version="$(sed -n 's/^Version:[[:space:]]*//p' control | head -n1)"
+          test -n "$version"
+          tag="v$version"
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --title "ChatGPTRepair" --notes ""
+          else
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "ChatGPTRepair" --notes ""
+          fi
+
+          gh release upload "$tag" dist/ChatGPTRepair_iphoneos-arm64.deb \
             --repo "$GITHUB_REPOSITORY" --clobber
 
-          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v57.2" --jq '.id')"
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '.id')"
+
+          # Keep one clean release only, and remove stale release tags such as v57.2.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq '.[] | [.id, .tag_name] | @tsv' |
+          while IFS=\t' read -r old_id old_tag; do
+            [ -n "$old_id" ] || continue
+            if [ "$old_id" != "$release_id" ]; then
+              gh release delete "$old_tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+            fi
+          done
+
+          # Keep exactly one DEB asset on the current release.
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" \
+            --jq '.[] | select(.name | endswith(".deb")) | [.id, .name] | @tsv' |
+          while IFS=\t' read -r asset_id name; do
+            [ -n "$asset_id" ] || continue
+            if [ "$name" != "ChatGPTRepair_iphoneos-arm64.deb" ]; then
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+            fi
+          done
+
+          test "$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].id' | wc -l | tr -d ' ')" -eq 1
           test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" \
             --jq '[.[] | select(.name | endswith(".deb"))] | length')" -eq 1
           test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" \
             --jq '[.[] | select(.name == "ChatGPTRepair_iphoneos-arm64.deb")] | length')" -eq 1
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.body // ""')" = ""
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.name')" = "ChatGPTRepair"
