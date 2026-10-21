@@ -43,6 +43,10 @@ void CGConversationPagingProcessDetailResponse(
     }
 
     NSArray *newest=CGConversationPagingMessages(root);
+    // A full first page plus a valid start cursor is enough evidence to try
+    // one older request even if a server variant omits/misreports the boolean.
+    // The older-page path stops on a repeated/non-advancing cursor.
+    BOOL inferredHasPrevious=hasPrevious || (cursor.length && newest.count>=10);
     NSArray *merged=newest;
     NSString *current=[root[@"current_node"] isKindOfClass:NSString.class]?root[@"current_node"]:nil;
     if (!current.length) {
@@ -65,7 +69,7 @@ void CGConversationPagingProcessDetailResponse(
             state.messages=merged;
             state.baseRoot=root;
             if (current.length) state.currentNode=current;
-            if (!state.loadedOlder) { state.startCursor=cursor; state.hasPrevious=hasPrevious; }
+            if (!state.loadedOlder) { state.startCursor=cursor; state.hasPrevious=inferredHasPrevious; }
             state.originalRequest=[originalRequest copy];
             state.configuration=[configuration copy] ?: [NSURLSessionConfiguration defaultSessionConfiguration];
             state.responseTemplate=response;
