@@ -1097,7 +1097,7 @@ static void LRVRestoreApplicationKeyWindow(UIWindow *overlayWindow) {
     BOOL categorySet = [audioSession setCategory:AVAudioSessionCategoryPlayAndRecord
                                             mode:AVAudioSessionModeVoiceChat
                                          options:(AVAudioSessionCategoryOptionDefaultToSpeaker |
-                                                  AVAudioSessionCategoryOptionAllowBluetoothHFP)
+                                                  AVAudioSessionCategoryOptionAllowBluetooth)
                                            error:&audioError];
     if (!categorySet) {
         LRVLog(@"audio category setup failed domain=%@ code=%ld",
