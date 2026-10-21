@@ -1,6 +1,6 @@
 Package: com.551uk.chatgptrepair
 Name: ChatGPTRepair
-Version: 57.7
+Version: 57.8
 Architecture: iphoneos-arm64
 Section: Tweaks
 Maintainer: 551UK
