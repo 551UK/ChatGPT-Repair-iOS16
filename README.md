@@ -1,6 +1,6 @@
 # ChatGPTRepair
 
-Source-built compatibility tweak for ChatGPT 1.2024.200 on jailbroken iOS 16.
+One unified, source-built iOS 16 ChatGPT tweak: models, voice, generated images, chat history, sidebar, pins, links and downloads.
 
 ## Features
 
