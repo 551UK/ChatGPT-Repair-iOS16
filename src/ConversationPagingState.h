@@ -1,18 +1,30 @@
 #import <Foundation/Foundation.h>
 
-extern NSString *CGPagingSelectedID;
+NS_ASSUME_NONNULL_BEGIN
+
+extern NSString * _Nullable CGPagingSelectedID;
 extern NSUInteger CGPagingGeneration;
 
 NSObject *CGPagingStateLock(void);
-NSString *CGPagingConversationID(NSURLRequest *request);
-NSURLRequest *CGPagingModernRequest(NSURLRequest *original, NSString *before);
-NSInteger CGPagingStatus(NSURLResponse *response);
+NSString * _Nullable CGPagingConversationID(NSURLRequest *request);
+NSURLRequest *CGPagingModernRequest(NSURLRequest *original, NSString * _Nullable before);
+NSInteger CGPagingStatus(NSURLResponse * _Nullable response);
 BOOL CGPagingCompatibilityFailure(NSInteger status);
-BOOL CGPagingTransientFailure(NSInteger status, NSError *error);
-NSTimeInterval CGPagingRetryAfter(NSURLResponse *response);
-NSURLResponse *CGPagingLegacyResponse(NSURLResponse *response, NSURL *legacyURL, NSUInteger length);
+BOOL CGPagingTransientFailure(NSInteger status, NSError * _Nullable error);
+NSTimeInterval CGPagingRetryAfter(NSURLResponse * _Nullable response);
+NSURLResponse * _Nullable CGPagingLegacyResponse(NSURLResponse * _Nullable response,
+                                                  NSURL *legacyURL,
+                                                  NSUInteger length);
 BOOL CGPagingStillActive(NSString *cid, NSUInteger generation);
-BOOL CGPagingValidPageRoot(NSDictionary *root, BOOL *hasPrevious, NSString **cursor);
-void CGPagingFetchLegacy(NSURLSessionConfiguration *configuration, NSURLRequest *request,
-                         NSString *cid, NSUInteger generation,
-                         void (^completion)(NSData *,NSURLResponse *,NSError *));
+BOOL CGPagingValidPageRoot(NSDictionary *root,
+                           BOOL * _Nullable hasPrevious,
+                           NSString * _Nullable * _Nullable cursor);
+void CGPagingFetchLegacy(NSURLSessionConfiguration * _Nullable configuration,
+                         NSURLRequest *request,
+                         NSString *cid,
+                         NSUInteger generation,
+                         void (^completion)(NSData * _Nullable,
+                                            NSURLResponse * _Nullable,
+                                            NSError * _Nullable));
+
+NS_ASSUME_NONNULL_END
