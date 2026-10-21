@@ -1,3 +1,4 @@
+// ChatGPTRepair: Degrade unsupported rich layouts into readable legacy markup.
 #import "RichMarkupCompat.h"
 #import <Foundation/Foundation.h>
 

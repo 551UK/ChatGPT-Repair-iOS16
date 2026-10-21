@@ -1,3 +1,4 @@
+// ChatGPTRepair: Adapt modern citations and linked source tokens for iOS 16.
 #import "CitationCompat.h"
 #import "RichMarkupCompat.h"
 

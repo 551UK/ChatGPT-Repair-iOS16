@@ -1,3 +1,4 @@
+// ChatGPTRepair: Prevent unrendered citation tokens appearing inside chat messages.
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
