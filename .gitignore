@@ -1,3 +1,4 @@
+# Ignore Theos build output, compiled tweaks, packages and logs.
 .theos/
 obj/
 packages/
