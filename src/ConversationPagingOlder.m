@@ -1,16 +1,47 @@
 #import "ConversationPagingCompat.h"
 #import "ConversationPagingState.h"
 #import "ConversationPagingCore.h"
-#import <objc/runtime.h>
 #include <math.h>
 
-static const CGFloat kLoadOlderDistance=520.0;
-static char kPagingLastOffset;
+static const CGFloat kLoadOlderDistance=700.0;
+static __weak UIActivityIndicatorView *sPagingSpinner;
 
 @interface NSURLSession (CGConversationPagingOriginal)
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request
     completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler;
 @end
+
+static UIWindow *CGPagingFrontWindow(void) {
+    for (UIWindow *window in UIApplication.sharedApplication.windows.reverseObjectEnumerator)
+        if (!window.hidden && window.alpha>0.01 && window.windowLevel==UIWindowLevelNormal)
+            return window;
+    return UIApplication.sharedApplication.windows.firstObject;
+}
+
+static void CGPagingSetLoading(BOOL visible) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIActivityIndicatorView *spinner=sPagingSpinner;
+        if (visible) {
+            UIWindow *window=CGPagingFrontWindow();
+            if (!window) return;
+            if (!spinner || spinner.superview!=window) {
+                [spinner removeFromSuperview];
+                spinner=[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+                spinner.userInteractionEnabled=NO;
+                spinner.hidesWhenStopped=YES;
+                spinner.accessibilityLabel=@"Loading older messages";
+                [window addSubview:spinner];
+                sPagingSpinner=spinner;
+            }
+            CGFloat top=window.safeAreaInsets.top+54.0;
+            spinner.center=CGPointMake(CGRectGetMidX(window.bounds),top);
+            [window bringSubviewToFront:spinner];
+            [spinner startAnimating];
+        } else {
+            [spinner stopAnimating];
+        }
+    });
+}
 
 static void CGPagingRestoreScroll(UIScrollView *scroll, CGSize oldSize, CGPoint oldOffset) {
     if (!scroll) return;
@@ -47,6 +78,7 @@ void CGPagingLoadOlder(void) {
         return;
     }
 
+    CGPagingSetLoading(YES);
     NSURLRequest *pageRequest=CGPagingModernRequest(originalRequest,cursor);
     NSURLSessionConfiguration *config=[configuration copy];
     config.timeoutIntervalForRequest=30;
@@ -55,6 +87,7 @@ void CGPagingLoadOlder(void) {
         NSURLSessionDataTask *task=[session cgp_dataTaskWithRequest:pageRequest completionHandler:
             ^(NSData *data, NSURLResponse *response, NSError *error) {
                 [session finishTasksAndInvalidate]; session=nil;
+                CGPagingSetLoading(NO);
                 NSInteger status=CGPagingStatus(response);
                 NSDictionary *page=nil; BOOL pageHasPrevious=NO; NSString *pageCursor=nil; BOOL fallback=NO;
                 if (!error && status>=200 && status<300) {
@@ -84,7 +117,8 @@ void CGPagingLoadOlder(void) {
                             state.hasPrevious=NO; return;
                         }
                         state.messages=merged; state.loadedOlder=YES; state.startCursor=pageCursor;
-                        state.hasPrevious=pageHasPrevious; state.retryNotBefore=0;
+                        state.hasPrevious=pageHasPrevious;
+                        state.retryNotBefore=NSDate.date.timeIntervalSince1970+0.8;
                         root=state.baseRoot; current=state.currentNode; original=state.originalRequest;
                         template=state.responseTemplate; forward=[state.completion copy]; scroll=state.scrollView;
                     }
@@ -101,27 +135,47 @@ void CGPagingLoadOlder(void) {
                     void (^capture)(void)=^{ oldSize=scroll.contentSize; oldOffset=scroll.contentOffset; };
                     if (NSThread.isMainThread) capture(); else dispatch_sync(dispatch_get_main_queue(),capture);
                 }
+                // The 2024 repository's detail completion is intentionally
+                // retained by the paging state and can accept refreshed
+                // synthetic mapping data for the currently selected chat.
                 forward(legacy,CGPagingLegacyResponse(template,original.URL,legacy.length),nil);
                 if (scroll) CGPagingRestoreScroll(scroll,oldSize,oldOffset);
             }];
         if (task) [task resume];
-        else { [session invalidateAndCancel]; session=nil; @synchronized(CGPagingStateLock()) { if (CGPagingState==state) state.loadingOlder=NO; } }
+        else {
+            [session invalidateAndCancel]; session=nil; CGPagingSetLoading(NO);
+            @synchronized(CGPagingStateLock()) { if (CGPagingState==state) state.loadingOlder=NO; }
+        }
     } @catch (__unused NSException *exception) {
-        [session invalidateAndCancel]; session=nil;
+        [session invalidateAndCancel]; session=nil; CGPagingSetLoading(NO);
         @synchronized(CGPagingStateLock()) { if (CGPagingState==state) state.loadingOlder=NO; }
     }
 }
 
 void CGConversationPagingHandleMessageScroll(UIScrollView *scrollView) {
-    if (!scrollView) return;
+    if (!scrollView || !scrollView.window) return;
     @synchronized(CGPagingStateLock()) {
         if (!CGPagingState || !CGPagingState.hasPrevious) return;
         CGPagingState.scrollView=scrollView;
     }
+
+    CGFloat minimum=-scrollView.adjustedContentInset.top;
+    CGFloat maximum=MAX(minimum,scrollView.contentSize.height-scrollView.bounds.size.height+
+                        scrollView.adjustedContentInset.bottom);
     CGFloat y=scrollView.contentOffset.y;
-    NSNumber *last=objc_getAssociatedObject(scrollView,&kPagingLastOffset);
-    objc_setAssociatedObject(scrollView,&kPagingLastOffset,@(y),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (!last || !(scrollView.dragging || scrollView.decelerating)) return;
-    CGFloat distance=y+scrollView.adjustedContentInset.top;
-    if (y<last.doubleValue-0.25 && isfinite(distance) && distance<kLoadOlderDistance) CGPagingLoadOlder();
+    CGFloat topDistance=fabs(y-minimum);
+    CGFloat bottomDistance=fabs(maximum-y);
+    BOOL contentFits=scrollView.contentSize.height<=scrollView.bounds.size.height+80.0;
+    BOOL userMoving=scrollView.dragging || scrollView.decelerating || scrollView.tracking;
+
+    // BottomAlignedCollectionViewController can report its conversation-start
+    // edge differently depending on the active layout. Treat either visible
+    // edge as a valid paging trigger once the user interacts. If the first page
+    // is shorter than one screen, load older immediately because there is no
+    // scroll gesture capable of reaching another edge.
+    if (contentFits ||
+        (userMoving && ((isfinite(topDistance) && topDistance<kLoadOlderDistance) ||
+                        (isfinite(bottomDistance) && bottomDistance<kLoadOlderDistance)))) {
+        CGPagingLoadOlder();
+    }
 }
