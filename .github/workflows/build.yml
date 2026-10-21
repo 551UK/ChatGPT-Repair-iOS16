@@ -124,3 +124,30 @@ jobs:
             --jq '[.[] | select(.name == "ChatGPTRepair_iphoneos-arm64.deb")] | length')" -eq 1
           test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.body // ""')" = ""
           test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" --jq '.name')" = "ChatGPTRepair"
+
+      - name: Remove obsolete branches and tags
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$(sed -n 's/^Version:[[:space:]]*//p' control | head -n1)"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '.tag_name')" = "$tag"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag/assets" --jq '[.[] | select(.name == "ChatGPTRepair_iphoneos-arm64.deb")] | length')" -eq 1
+          gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name' |
+          while IFS= read -r old_branch; do
+            [ -n "$old_branch" ] || continue
+            [ "$old_branch" = "main" ] && continue
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$old_branch" >/dev/null
+            echo "Removed branch: $old_branch"
+          done
+          gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags" --jq '.[].ref' |
+          while IFS= read -r old_ref; do
+            [ -n "$old_ref" ] || continue
+            [ "$old_ref" = "refs/tags/$tag" ] && continue
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/$old_ref" >/dev/null
+            echo "Removed tag: $old_ref"
+          done
+          test "$(gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name' | grep -c .)" -eq 1
+          test "$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags" --jq '.[].ref' | grep -c .)" -eq 1

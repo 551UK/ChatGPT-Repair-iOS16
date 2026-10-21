@@ -1,26 +1,24 @@
 # ChatGPTRepair
 
-Source-built compatibility tweak for the official legacy ChatGPT iOS app on jailbroken iOS 16.
+Source-built compatibility tweak for ChatGPT 1.2024.200 on jailbroken iOS 16.
 
 ## Features
 
-- Restores chat history, longer conversations, and a pinned sidebar with pin/unpin actions.
-- Protects the active conversation from sidebar refreshes and transient failed requests.
-- Restores file downloads, clickable links, citations, and rich markup compatibility.
-- Adds the original ChatGBeFree model, generated-image, copying, voice, and sunset-bypass compatibility modules.
-
-## Source and credits
-
-Every functional component is compiled directly from the files in this repository. The original ChatGBeFree project is preserved under `upstream/chatgbefree/` with its licence, README, and build files. Original upstream project: https://github.com/liamschwie/ChatGBeFree .
-
-This repository is distributed under GNU GPLv3. The single `ChatGPTRepair.dylib` in the rootless Debian package is built from source; no precompiled ChatGBeFree binary is included.
+- Restores chat history, older conversations and long-chat loading.
+- Provides a pinned sidebar section with pin/unpin controls.
+- Prevents active chats blanking during sidebar refreshes and transient network errors.
+- Restores downloads, clickable links, citations and newer response formatting.
+- Provides supported models and thinking options, with persistent selections.
+- Restores voice, generated images, image history and the sunset-screen bypass.
 
 ## Build
 
-Install Theos with an iOS SDK and run:
+Install Theos and an iOS SDK. Run `make clean package FINALPACKAGE=1`.
 
-```sh
-make clean package FINALPACKAGE=1
-```
+The source in `upstream/chatgbefree/` (ChatGBeFree 2.4.0) and `src/` (551UK repairs) compiles into a single `ChatGPTRepair.dylib` within one rootless `.deb`. No precompiled third-party binaries, patched IPAs or binary repacking are used.
 
-Only install one ChatGBeFree-compatible tweak at a time to avoid duplicate runtime hooks.
+## Credits
+
+ChatGBeFree source originally by [liamschwie](https://github.com/liamschwie/ChatGBeFree). Original authorship retained. Distributed under GNU GPLv3; see `LICENSE`.
+
+Do not simultaneously install another ChatGBeFree-compatible tweak.

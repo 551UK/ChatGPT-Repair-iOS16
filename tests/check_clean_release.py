@@ -31,4 +31,11 @@ assert "didMoveToWindow" not in (root/"src/LinkFix.m").read_text()
 assert "richPattern" in (root/"src/LinkFix.m").read_text()
 assert "NSRegularExpression" in (root/"src/LinkFix.m").read_text()
 assert "NSDataDetector" in (root/"src/LinkFix.m").read_text()
-print("PASS: no diagnostic log writers or passive history probes; required features intact")
+# Remove duplicate upstream packaging; retain all Objective-C source and tests.
+for unused in ('Makefile','control','ChatGBeFree.plist','README.md','LICENSE','.gitignore','.gitattributes'):
+    assert not (root/'upstream/chatgbefree'/unused).exists(), unused
+for path in root.rglob('*'):
+    if path.is_file():
+        assert path.suffix.lower() not in ('.deb','.dylib','.a','.o'), path
+
+print("PASS: clean source-only tree and existing repair regression guards")
