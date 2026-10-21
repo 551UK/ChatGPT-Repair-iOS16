@@ -1,3 +1,4 @@
+// ChatGPTRepair: Adapt legacy list layout for pinned conversations.
 // PinnedLayoutShim.m — 551UK / GPL-3.0
 // Add a native layout gap without touching any UICollectionViewCell frame,
 // transform, font or subview. Only the history list's layout is affected.

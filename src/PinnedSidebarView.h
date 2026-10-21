@@ -1,3 +1,4 @@
+// ChatGPTRepair: Pinned chats sidebar view interface.
 // PinnedSidebarView.h — 551UK, GPL-3.0
 // Native iOS 16 UIKit presentation for the server-backed pinned conversations.
 // Host controller integration deliberately separate from this reusable view.

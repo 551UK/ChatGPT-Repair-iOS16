@@ -1,3 +1,4 @@
+// ChatGPTRepair: Render the pinned conversations sidebar UI.
 // PinnedSidebarView.m — 551UK, GPL-3.0
 // UIKit view: Pinned heading, collapse/expand, scrollable live pinned rows.
 // This file implements presentation only, no speculative Swift runtime hooks.

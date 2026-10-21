@@ -1,3 +1,4 @@
+// ChatGPTRepair: Maintain pinned sidebar section state.
 // PinnedSectionStore.m — 551UK, GPL-3.0
 #import "PinnedSectionStore.h"
 

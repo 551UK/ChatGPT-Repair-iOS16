@@ -1,3 +1,4 @@
+// ChatGPTRepair: Arrange pinned section above conversation history.
 // PinnedSectionLayout.m — 551UK, GPL-3.0
 #import "PinnedSectionLayout.h"
 

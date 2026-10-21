@@ -1,3 +1,4 @@
+// ChatGPTRepair: Pinned conversation section state interface.
 // PinnedSectionStore.h — 551UK, GPL-3.0
 #import <Foundation/Foundation.h>
 #import "PinnedSectionLayout.h"

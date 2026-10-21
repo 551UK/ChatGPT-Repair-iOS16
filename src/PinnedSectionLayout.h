@@ -1,3 +1,4 @@
+// ChatGPTRepair: Pinned sidebar section layout definitions.
 // PinnedSectionLayout.h — 551UK, GPL-3.0
 // Dynamic pinned section from the complete server pins list, not first 20 chats.
 // Reuses native history rows when available and retains every off-page pin.
