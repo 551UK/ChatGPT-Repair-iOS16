@@ -1,3 +1,4 @@
+// ChatGPTRepair: Persist and restore the chosen model and thinking effort; based on ChatGBeFree 2.4.0.
 #import "LegacyModelSelectionPersistence.h"
 #import "LegacyModelSwitcher.h"
 #import "../Runtime/ChatGPTRuntimeResolver.h"
