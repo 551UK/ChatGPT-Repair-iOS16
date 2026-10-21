@@ -1,3 +1,4 @@
+// ChatGPTRepair: restore authenticated file downloads in the legacy iOS client.
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 

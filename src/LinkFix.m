@@ -1,3 +1,4 @@
+// ChatGPTRepair: make legacy ChatGPT links and download labels tappable.
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
