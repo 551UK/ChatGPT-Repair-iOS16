@@ -1,1 +1,2 @@
+/* Inject the unified tweak only into the ChatGPT iOS app. */
 { Filter = { Bundles = ( "com.openai.chat" ); }; }
