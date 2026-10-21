@@ -1,6 +1,5 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
-#import <dlfcn.h>
 
 static NSDictionary<NSString *, NSString *> *gCGRDownloadHeaders;
 
@@ -190,9 +189,6 @@ static void CGRDownloadFixInit(void) {
         if (![[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.openai.chat"]) return;
 
         CGRRemoveOldDownloadTestLog();
-
-        // Preserve the proven Fix7 load order: make sure the existing 55.5 core is loaded first.
-        dlopen("/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib", RTLD_LAZY | RTLD_GLOBAL);
 
         Class cls = [NSURLSession class];
         CGRSwapDownloadMethod(cls, @selector(dataTaskWithRequest:), @selector(cgrdf_dataTaskWithRequest:));
