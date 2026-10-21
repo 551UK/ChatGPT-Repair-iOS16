@@ -1,9 +1,12 @@
 Package: com.551uk.chatgptrepair
 Name: ChatGPTRepair
-Version: 58.2
+Version: 59.0
 Architecture: iphoneos-arm64
 Section: Tweaks
 Maintainer: 551UK
 Author: 551UK
 Depends: firmware (>= 16.0), mobilesubstrate
 Description: Restores missing functionality to ChatGPT.
+
+Conflicts: com.liam.chatgbefree
+Replaces: com.liam.chatgbefree

@@ -1,7 +1,6 @@
 /* ChatGPTRepair: production history URL adapter preserving v53 query semantics. */
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
-extern void CGRCompatibilityEnsureLoaded(void);
 
 static BOOL CGRHistoryRequest(NSURLRequest *request) {
     if (![request.HTTPMethod.uppercaseString isEqualToString:@"GET"]) return NO;
@@ -157,8 +156,7 @@ static void CGRInstallBrowserListAdapter(void) {
 __attribute__((constructor)) static void CGRStart(void) {
     @autoreleasepool {
         if (![[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.openai.chat"]) return;
-        CGRCompatibilityEnsureLoaded();
-        
+
         CGRInstallBrowserListAdapter();
     }
 }

@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - 'src/**'
+      - 'upstream/chatgbefree/**'
       - 'Makefile'
       - 'control'
       - 'ChatGPTRepair.plist'
@@ -54,141 +55,35 @@ jobs:
           clang -fobjc-arc -fblocks -framework Foundation             src/CitationCompat.m src/RichMarkupCompat.m tests/CitationCompatTests.m             -o "$RUNNER_TEMP/CitationCompatTests"
           "$RUNNER_TEMP/CitationCompatTests"
 
-      - name: Compile current core
+      - name: Compile source-only unified tweak
         shell: bash
         run: |
           set -euo pipefail
           export THEOS="$HOME/theos"
-          make clean
-          make package FINALPACKAGE=1
-          deb="$(find packages -maxdepth 1 -name '*.deb' -print -quit)"
+          make clean package FINALPACKAGE=1
+          deb="$(find packages -maxdepth 1 -type f -name '*.deb' -print -quit)"
           test -n "$deb"
-          mkdir -p build/newcore
-          cp "$deb" build/newcore.deb
-          dpkg-deb -x "$deb" build/newcore
-          test -f build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.dylib
-          test -f build/newcore/var/jb/Library/MobileSubstrate/DynamicLibraries/ChatGPTRepair.plist
+          mkdir -p dist build/source-only-check
+          cp "$deb" dist/ChatGPTRepair_iphoneos-arm64.deb
+          dpkg-deb -x "$deb" build/source-only-check
+          test "$(dpkg-deb -f "$deb" Package)" = "com.551uk.chatgptrepair"
+          expected_version="$(sed -n 's/^Version:[[:space:]]*//p' control | head -n 1)"
+          test "$(dpkg-deb -f "$deb" Version)" = "$expected_version"
+          target="build/source-only-check/var/jb/Library/MobileSubstrate/DynamicLibraries"
+          test -f "$target/ChatGPTRepair.dylib"
+          test -f "$target/ChatGPTRepair.plist"
+          test "$(find "$target" -maxdepth 1 -type f -name '*.dylib' | wc -l | tr -d ' ')" -eq 1
+          test "$(find "$target" -maxdepth 1 -type f -name '*.plist' | wc -l | tr -d ' ')" -eq 1
+          test ! -e "$target/ChatGBeFree.dylib"
+          test ! -e "$target/ZZChatGPTDownloadFix.dylib"
+          test ! -e "$target/ZZChatGPTLinkFix.dylib"
 
-      - name: Build stable helper components
-        if: github.ref == 'refs/heads/main'
-        shell: bash
-        run: |
-          set -euo pipefail
-          export THEOS="$HOME/theos"
-          rm -rf build/helpers-src build/helpers build/compat build/compat.deb
-          mkdir -p build/helpers-src build/helpers build/compat
-
-          cp src/DownloadFix.m build/helpers-src/DownloadFix.m
-          cp src/LinkFix.m build/helpers-src/LinkFix.m
-
-          cat > build/helpers-src/Makefile <<'EOF'
-          TARGET := iphone:clang:16.5:16.0
-          ARCHS = arm64
-          THEOS_PACKAGE_SCHEME = rootless
-          INSTALL_TARGET_PROCESSES = ChatGPT
-
-          include $(THEOS)/makefiles/common.mk
-
-          TWEAK_NAME = ZZChatGPTDownloadFix ZZChatGPTLinkFix
-          ZZChatGPTDownloadFix_FILES = DownloadFix.m
-          ZZChatGPTDownloadFix_CFLAGS = -fobjc-arc -fblocks -Wno-deprecated-declarations
-          ZZChatGPTDownloadFix_FRAMEWORKS = Foundation
-
-          ZZChatGPTLinkFix_FILES = LinkFix.m
-          ZZChatGPTLinkFix_CFLAGS = -fobjc-arc -fblocks -Wno-deprecated-declarations
-          ZZChatGPTLinkFix_FRAMEWORKS = Foundation UIKit
-
-          include $(THEOS_MAKE_PATH)/tweak.mk
-          EOF
-
-          cat > build/helpers-src/ZZChatGPTDownloadFix.plist <<'EOF'
-          { Filter = { Bundles = ( "com.openai.chat" ); }; }
-          EOF
-          cat > build/helpers-src/ZZChatGPTLinkFix.plist <<'EOF'
-          { Filter = { Bundles = ( "com.openai.chat" ); }; }
-          EOF
-          cat > build/helpers-src/control <<'EOF'
-          Package: com.551uk.chatgptrepair.helpers
-          Name: ChatGPTRepair Helpers
-          Version: 1.0
-          Architecture: iphoneos-arm64
-          Section: Tweaks
-          Maintainer: 551UK
-          Author: 551UK
-          Depends: firmware (>= 16.0), mobilesubstrate
-          Description: Build-only helper package.
-          EOF
-
-          (
-            cd build/helpers-src
-            make clean
-            make package FINALPACKAGE=1
-          )
-          helper_deb="$(find build/helpers-src/packages -maxdepth 1 -name '*.deb' -print -quit)"
-          test -n "$helper_deb"
-          dpkg-deb -x "$helper_deb" build/helpers
-
-          helper_target="build/helpers/var/jb/Library/MobileSubstrate/DynamicLibraries"
-          test -f "$helper_target/ZZChatGPTDownloadFix.dylib"
-          test -f "$helper_target/ZZChatGPTDownloadFix.plist"
-          test -f "$helper_target/ZZChatGPTLinkFix.dylib"
-          test -f "$helper_target/ZZChatGPTLinkFix.plist"
-
-          python3 - <<'PY'
-          import base64, pathlib
-          src=pathlib.Path("vendor/compatibility-2.3.5.deb.b64")
-          out=pathlib.Path("build/compat.deb")
-          out.write_bytes(base64.b64decode(src.read_bytes()))
-          PY
-          test "$(dpkg-deb -f build/compat.deb Package)" = "com.liam.chatgbefree"
-          test "$(dpkg-deb -f build/compat.deb Version)" = "2.3.5"
-          dpkg-deb -x build/compat.deb build/compat
-          compat_target="build/compat/var/jb/Library/MobileSubstrate/DynamicLibraries"
-          test -f "$compat_target/ChatGBeFree.dylib"
-          test -f "$compat_target/ChatGBeFree.plist"
-
-      - name: Build clean production package
-        if: github.ref == 'refs/heads/main'
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf build/pkgroot build/finalcheck dist
-          mkdir -p build/pkgroot build/finalcheck dist
-          dpkg-deb -R build/newcore.deb build/pkgroot
-
-          target="build/pkgroot/var/jb/Library/MobileSubstrate/DynamicLibraries"
-          helper="build/helpers/var/jb/Library/MobileSubstrate/DynamicLibraries"
-          compat="build/compat/var/jb/Library/MobileSubstrate/DynamicLibraries"
-
-          cp "$compat/ChatGBeFree.dylib" "$target/ChatGBeFree.dylib"
-          cp "$compat/ChatGBeFree.plist" "$target/ChatGBeFree.plist"
-          cp "$helper/ZZChatGPTDownloadFix.dylib" "$target/ZZChatGPTDownloadFix.dylib"
-          cp "$helper/ZZChatGPTDownloadFix.plist" "$target/ZZChatGPTDownloadFix.plist"
-          cp "$helper/ZZChatGPTLinkFix.dylib" "$target/ZZChatGPTLinkFix.dylib"
-          cp "$helper/ZZChatGPTLinkFix.plist" "$target/ZZChatGPTLinkFix.plist"
-          cp control build/pkgroot/DEBIAN/control
-
-          dpkg-deb --root-owner-group -b build/pkgroot dist/ChatGPTRepair_iphoneos-arm64.deb
-          test "$(dpkg-deb -f dist/ChatGPTRepair_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
-          expected_version="$(sed -n 's/^Version:[[:space:]]*//p' control | head -n1)"
-          test -n "$expected_version"
-          test "$(dpkg-deb -f dist/ChatGPTRepair_iphoneos-arm64.deb Version)" = "$expected_version"
-
-          dpkg-deb -x dist/ChatGPTRepair_iphoneos-arm64.deb build/finalcheck
-          final="build/finalcheck/var/jb/Library/MobileSubstrate/DynamicLibraries"
-
-          test -f "$final/ChatGPTRepair.dylib"
-          test -f "$final/ChatGPTRepair.plist"
-          test -f "$final/ChatGBeFree.dylib"
-          test -f "$final/ChatGBeFree.plist"
-          test -f "$final/ZZChatGPTDownloadFix.dylib"
-          test -f "$final/ZZChatGPTDownloadFix.plist"
-          test -f "$final/ZZChatGPTLinkFix.dylib"
-          test -f "$final/ZZChatGPTLinkFix.plist"
-          test "$(find "$final" -maxdepth 1 -name '*.dylib' | wc -l | tr -d ' ')" = "4"
-          test ! -e "$final/ZZZZChatGPTBlankDiag.dylib"
-          test ! -e "$final/ZZZZChatGPTSidebarBlankDiag.dylib"
-          test ! -e "$final/ZZZZZChatGPTSidebarTrace.dylib"
+      - name: Upload test installer
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatGPTRepair-source-only-test
+          path: dist/ChatGPTRepair_iphoneos-arm64.deb
 
       - name: Publish clean release
         if: github.ref == 'refs/heads/main'

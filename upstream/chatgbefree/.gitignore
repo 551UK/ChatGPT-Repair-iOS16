@@ -1,0 +1,12 @@
+# Theos build artifacts
+.theos/
+packages/
+obj/
+
+# macOS
+.DS_Store
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
