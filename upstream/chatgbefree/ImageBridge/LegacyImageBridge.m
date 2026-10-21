@@ -1,3 +1,4 @@
+// ChatGPTRepair: Translate generated image results and authenticated Sediment assets; based on ChatGBeFree 2.4.0.
 #import "LegacyImageBridge.h"
 
 static NSString *CGBNormalizedImageKey(NSString *key) {
