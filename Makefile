@@ -1,3 +1,4 @@
+# Compile all ChatGBeFree 2.4.0 and 551UK repair modules into one rootless ChatGPTRepair tweak.
 TARGET := iphone:clang:16.5:16.0
 ARCHS = arm64
 THEOS_PACKAGE_SCHEME = rootless
