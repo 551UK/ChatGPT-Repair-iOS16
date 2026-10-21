@@ -2,7 +2,7 @@
 #import "ConversationPagingCore.h"
 #include <math.h>
 
-static const NSUInteger kConversationPageSize=10;
+static const NSUInteger kConversationPageSize=100;
 
 @interface NSURLSession (CGConversationPagingOriginal)
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request
