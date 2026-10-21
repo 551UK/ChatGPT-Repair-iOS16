@@ -1,4 +1,4 @@
-// ChatGPTRepair: Remembered model selection declarations; based on ChatGBeFree 2.4.0.
+// ChatGPTRepair: Remembered model selection declarations.
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN

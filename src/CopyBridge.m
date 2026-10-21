@@ -1,5 +1,5 @@
-// ChatGPTRepair: Clean legacy Markdown copying while preserving emoji and Unicode; based on ChatGBeFree 2.4.0.
-#import "LegacyCopyBridge.h"
+// ChatGPTRepair: Clean legacy Markdown copying while preserving emoji and Unicode.
+#import "CopyBridge.h"
 
 NSString *CGBNormalizedCopiedText(NSString *text) {
     if (![text isKindOfClass:NSString.class] || text.length == 0) {

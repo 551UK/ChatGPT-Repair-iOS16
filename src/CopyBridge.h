@@ -1,4 +1,4 @@
-// ChatGPTRepair: Copying and text normalization interfaces; based on ChatGBeFree 2.4.0.
+// ChatGPTRepair: Copying and text normalization interfaces.
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN

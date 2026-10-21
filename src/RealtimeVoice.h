@@ -1,4 +1,4 @@
-// ChatGPTRepair: Realtime voice API definitions; based on ChatGBeFree 2.4.0.
+// ChatGPTRepair: Realtime voice API definitions.
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN

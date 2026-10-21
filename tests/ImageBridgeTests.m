@@ -1,7 +1,7 @@
 // ChatGPTRepair: Test generated image history and Sediment link handling.
 #import <Foundation/Foundation.h>
 
-#import "../../src/ImageBridge/LegacyImageBridge.h"
+#import "../src/ImageBridge.h"
 
 static void Require(BOOL condition, NSString *message) {
     if (!condition) {

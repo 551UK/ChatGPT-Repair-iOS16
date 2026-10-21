@@ -1,5 +1,5 @@
-// ChatGPTRepair: Account-supported model catalogue and thinking effort selection; based on ChatGBeFree 2.4.0.
-#import "LegacyModelSwitcher.h"
+// ChatGPTRepair: Account-supported model catalogue and thinking effort selection.
+#import "ModelSwitcher.h"
 
 static NSString *const CGBSlugPrefix = @"cgbf.v1.";
 static NSString *const CGBSelectionDefaultsKey =

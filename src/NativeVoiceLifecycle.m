@@ -1,7 +1,7 @@
-// ChatGPTRepair: Native voice presentation lifecycle compatibility; based on ChatGBeFree 2.4.0.
-#import "LegacyNativeVoiceLifecycle.h"
-#import "LegacyRealtimeVoice.h"
-#import "../Runtime/ChatGPTRuntimeResolver.h"
+// ChatGPTRepair: Native voice presentation lifecycle compatibility.
+#import "NativeVoiceLifecycle.h"
+#import "RealtimeVoice.h"
+#import "RuntimeResolver.h"
 
 #import <substrate.h>
 

@@ -1,14 +1,14 @@
-// ChatGPTRepair: Legacy voice API, modern response transport, and voice controls; based on ChatGBeFree 2.4.0.
+// ChatGPTRepair: Legacy voice API, modern response transport, and voice controls.
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <substrate.h>
 
-#import "LegacyRealtimeVoice.h"
-#import "LegacyNativeVoiceLifecycle.h"
-#import "../CopyBridge/LegacyCopyBridge.h"
-#import "../ImageBridge/LegacyImageBridge.h"
-#import "../ModelSwitcher/LegacyModelSwitcher.h"
-#import "../ModelSwitcher/LegacyModelSelectionPersistence.h"
+#import "RealtimeVoice.h"
+#import "NativeVoiceLifecycle.h"
+#import "CopyBridge.h"
+#import "ImageBridge.h"
+#import "ModelSwitcher.h"
+#import "ModelSelectionPersistence.h"
 
 static NSString *const LVBVersion = @"1.2026.202";
 static NSString *const LVBBuild = @"30140022279";

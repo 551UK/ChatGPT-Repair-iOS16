@@ -1,4 +1,4 @@
-// ChatGPTRepair: Generated image compatibility interfaces; based on ChatGBeFree 2.4.0.
+// ChatGPTRepair: Generated image compatibility interfaces.
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN

@@ -1,4 +1,4 @@
-// ChatGPTRepair: Model and thinking-level catalogue translation declarations; based on ChatGBeFree 2.4.0.
+// ChatGPTRepair: Model and thinking-level catalogue translation declarations.
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN

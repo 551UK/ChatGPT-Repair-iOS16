@@ -20,9 +20,9 @@ assert not (root/"src/CompatibilityBoot.m").exists()
 assert not (root/"vendor/compatibility-2.3.5.deb.b64").exists()
 assert not (root/"scripts/package_combined.py").exists()
 assert "ChatGPTRepair_LIBRARIES = substrate" in (root/"Makefile").read_text()
-for filename in ("VoiceBridge/LegacyVoiceBridge.m","VoiceBridge/LegacyRealtimeVoice.m","CopyBridge/LegacyCopyBridge.m","ImageBridge/LegacyImageBridge.m","ModelSwitcher/LegacyModelSwitcher.m","Runtime/ChatGPTRuntimeResolver.m"):
-    assert (root/"src"/filename).exists()
-    assert "src/"+filename in (root/"Makefile").read_text()
+for filename in ("VoiceBridge.m","RealtimeVoice.m","CopyBridge.m","ImageBridge.m","ModelSwitcher.m","ModelSelectionPersistence.m","RuntimeResolver.m"):
+    assert (root/"src"/filename).exists(), filename
+    assert "src/"+filename in (root/"Makefile").read_text(), filename
 for file in (root/"src").glob("*.m"):
     assert "CGRCompatibilityEnsureLoaded" not in file.read_text(), file
 assert "ChatGPTRepairDownloadFixTest.log" in (root/"src/DownloadFix.m").read_text()
@@ -32,12 +32,14 @@ assert "didMoveToWindow" not in (root/"src/LinkFix.m").read_text()
 assert "richPattern" in (root/"src/LinkFix.m").read_text()
 assert "NSRegularExpression" in (root/"src/LinkFix.m").read_text()
 assert "NSDataDetector" in (root/"src/LinkFix.m").read_text()
-# All source lives under src; no old second-tweak directory or binary.
+# One flat source and test layout, with no separate compatibility component.
 assert not (root/"upstream").exists()
-for module in ("VoiceBridge","CopyBridge","ModelSwitcher","ImageBridge","Runtime"):
-    assert (root/"src"/module).is_dir(), module
+assert not (root/"THIRD_PARTY_NOTICES.md").exists()
+for folder in ("VoiceBridge","CopyBridge","ModelSwitcher","ImageBridge","Runtime"):
+    assert not (root/"src"/folder).exists(), folder
 for file in ("CopyBridgeTests.m","ImageBridgeTests.m","ModelSwitcherTests.m"):
-    assert (root/"tests/ChatGBeFree"/file).exists(), file
+    assert (root/"tests"/file).exists(), file
+assert not (root/"tests/ChatGBeFree").exists()
 for path in root.rglob('*'):
     if path.is_file():
         assert path.suffix.lower() not in ('.deb','.dylib','.a','.o'), path

@@ -1,4 +1,4 @@
-# Compile all ChatGBeFree 2.4.0 and 551UK repair modules into one rootless ChatGPTRepair tweak.
+# Compile all ChatGPTRepair source files into one rootless iOS tweak.
 TARGET := iphone:clang:16.5:16.0
 ARCHS = arm64
 THEOS_PACKAGE_SCHEME = rootless
@@ -8,15 +8,15 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = ChatGPTRepair
 ChatGPTRepair_FILES = \
-	src/VoiceBridge/LegacyVoiceBridge.m \
-	src/VoiceBridge/LegacyRealtimeVoice.m \
-	src/VoiceBridge/LegacyNativeVoiceLifecycle.m \
-	src/VoiceBridge/LegacySDPTransform.m \
-	src/CopyBridge/LegacyCopyBridge.m \
-	src/ImageBridge/LegacyImageBridge.m \
-	src/ModelSwitcher/LegacyModelSwitcher.m \
-	src/ModelSwitcher/LegacyModelSelectionPersistence.m \
-	src/Runtime/ChatGPTRuntimeResolver.m \
+	src/VoiceBridge.m \
+	src/RealtimeVoice.m \
+	src/NativeVoiceLifecycle.m \
+	src/SDPTransform.m \
+	src/CopyBridge.m \
+	src/ImageBridge.m \
+	src/ModelSwitcher.m \
+	src/ModelSelectionPersistence.m \
+	src/RuntimeResolver.m \
 	src/CitationCompat.m \
 	src/RichMarkupCompat.m \
 	src/RendererCitationGuard.m \

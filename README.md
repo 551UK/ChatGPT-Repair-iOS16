@@ -11,3 +11,4 @@ One unified, source-built iOS 16 ChatGPT tweak: models, voice, generated images,
 - Provides supported models and thinking options, with persistent selections.
 - Restores voice, generated images, image history and the sunset-screen bypass.
 
+ChatGPTRepair is distributed under GPLv3 and includes compatibility code originally developed by liamschwie (ChatGBeFree), incorporated with permission. See `LICENSE`.

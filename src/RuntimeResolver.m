@@ -1,5 +1,5 @@
-// ChatGPTRepair: Resolve legacy Swift functions and verify binary signatures; based on ChatGBeFree 2.4.0.
-#import "ChatGPTRuntimeResolver.h"
+// ChatGPTRepair: Resolve legacy Swift functions and verify binary signatures.
+#import "RuntimeResolver.h"
 
 #import <Foundation/Foundation.h>
 #import <mach-o/dyld.h>
