@@ -9,7 +9,6 @@ NSURLRequest *CGConversationPagingPrepareDetailRequest(NSURLRequest *originalReq
 void CGConversationPagingProcessDetailResponse(
     NSURLSessionConfiguration * _Nullable configuration,
     NSURLRequest *originalRequest,
-    NSURLRequest *networkRequest,
     NSUInteger generation,
     NSData * _Nullable data,
     NSURLResponse * _Nullable response,
