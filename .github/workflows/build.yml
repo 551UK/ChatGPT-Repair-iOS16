@@ -19,6 +19,10 @@ permissions:
   contents: write
   actions: read
 
+concurrency:
+  group: chatgptrepair-main-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-15
