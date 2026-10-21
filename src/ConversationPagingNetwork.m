@@ -83,4 +83,14 @@ void CGConversationPagingProcessDetailResponse(
     if (!legacy.length) { CGPagingFetchLegacy(configuration,originalRequest,cid,generation,completion); return; }
     completion(legacy,CGPagingLegacyResponse(response,originalRequest.URL,legacy.length),nil);
     CGConversationPagingInstallScrollHook();
+
+    // Do not depend on the legacy UI reaching a particular scroll edge.
+    // Show the newest section immediately, then progressively fill every
+    // older page in the background until the real beginning is reached.
+    if (inferredHasPrevious) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.65*NSEC_PER_SEC)),
+                       dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
+            CGPagingLoadOlder();
+        });
+    }
 }
