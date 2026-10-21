@@ -313,6 +313,7 @@ NSData *CGRCitationCompatRewriteJSONData(NSData *data) {
     static NSData *productNeedle;
     static NSData *richNeedle;
     static NSData *buttonNeedle;
+    static NSData *iconNeedle;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         referencesNeedle=[@"content_references" dataUsingEncoding:NSUTF8StringEncoding];
@@ -321,6 +322,7 @@ NSData *CGRCitationCompatRewriteJSONData(NSData *data) {
         productNeedle=[@"product" dataUsingEncoding:NSUTF8StringEncoding];
         richNeedle=[@"<AsyncImage" dataUsingEncoding:NSUTF8StringEncoding];
         buttonNeedle=[@"GenUI.openUrl" dataUsingEncoding:NSUTF8StringEncoding];
+        iconNeedle=[@"<icon" dataUsingEncoding:NSUTF8StringEncoding];
     });
     NSRange whole=NSMakeRange(0,data.length);
     BOOL maybeReferences=[data rangeOfData:referencesNeedle options:0 range:whole].location!=NSNotFound;
@@ -329,7 +331,9 @@ NSData *CGRCitationCompatRewriteJSONData(NSData *data) {
     BOOL maybeProduct=[data rangeOfData:productNeedle options:0 range:whole].location!=NSNotFound;
     BOOL maybeRich=[data rangeOfData:richNeedle options:0 range:whole].location!=NSNotFound;
     BOOL maybeButton=[data rangeOfData:buttonNeedle options:0 range:whole].location!=NSNotFound;
-    if (!maybeReferences && !maybeFilecite && !maybeCite && !maybeProduct && !maybeRich && !maybeButton) return data;
+    BOOL maybeIcon=[data rangeOfData:iconNeedle options:0 range:whole].location!=NSNotFound;
+    if (!maybeReferences && !maybeFilecite && !maybeCite && !maybeProduct &&
+        !maybeRich && !maybeButton && !maybeIcon) return data;
 
     NSError *error=nil;
     id root=[NSJSONSerialization JSONObjectWithData:data
