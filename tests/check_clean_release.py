@@ -21,8 +21,8 @@ assert not (root/"vendor/compatibility-2.3.5.deb.b64").exists()
 assert not (root/"scripts/package_combined.py").exists()
 assert "ChatGPTRepair_LIBRARIES = substrate" in (root/"Makefile").read_text()
 for filename in ("VoiceBridge/LegacyVoiceBridge.m","VoiceBridge/LegacyRealtimeVoice.m","CopyBridge/LegacyCopyBridge.m","ImageBridge/LegacyImageBridge.m","ModelSwitcher/LegacyModelSwitcher.m","Runtime/ChatGPTRuntimeResolver.m"):
-    assert (root/"upstream/chatgbefree"/filename).exists()
-    assert "upstream/chatgbefree/"+filename in (root/"Makefile").read_text()
+    assert (root/"src"/filename).exists()
+    assert "src/"+filename in (root/"Makefile").read_text()
 for file in (root/"src").glob("*.m"):
     assert "CGRCompatibilityEnsureLoaded" not in file.read_text(), file
 assert "ChatGPTRepairDownloadFixTest.log" in (root/"src/DownloadFix.m").read_text()
@@ -32,9 +32,12 @@ assert "didMoveToWindow" not in (root/"src/LinkFix.m").read_text()
 assert "richPattern" in (root/"src/LinkFix.m").read_text()
 assert "NSRegularExpression" in (root/"src/LinkFix.m").read_text()
 assert "NSDataDetector" in (root/"src/LinkFix.m").read_text()
-# Remove duplicate upstream packaging; retain all Objective-C source and tests.
-for unused in ('Makefile','control','ChatGBeFree.plist','README.md','LICENSE','.gitignore','.gitattributes'):
-    assert not (root/'upstream/chatgbefree'/unused).exists(), unused
+# All source lives under src; no old second-tweak directory or binary.
+assert not (root/"upstream").exists()
+for module in ("VoiceBridge","CopyBridge","ModelSwitcher","ImageBridge","Runtime"):
+    assert (root/"src"/module).is_dir(), module
+for file in ("CopyBridgeTests.m","ImageBridgeTests.m","ModelSwitcherTests.m"):
+    assert (root/"tests/ChatGBeFree"/file).exists(), file
 for path in root.rglob('*'):
     if path.is_file():
         assert path.suffix.lower() not in ('.deb','.dylib','.a','.o'), path

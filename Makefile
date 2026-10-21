@@ -8,15 +8,15 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = ChatGPTRepair
 ChatGPTRepair_FILES = \
-	upstream/chatgbefree/VoiceBridge/LegacyVoiceBridge.m \
-	upstream/chatgbefree/VoiceBridge/LegacyRealtimeVoice.m \
-	upstream/chatgbefree/VoiceBridge/LegacyNativeVoiceLifecycle.m \
-	upstream/chatgbefree/VoiceBridge/LegacySDPTransform.m \
-	upstream/chatgbefree/CopyBridge/LegacyCopyBridge.m \
-	upstream/chatgbefree/ImageBridge/LegacyImageBridge.m \
-	upstream/chatgbefree/ModelSwitcher/LegacyModelSwitcher.m \
-	upstream/chatgbefree/ModelSwitcher/LegacyModelSelectionPersistence.m \
-	upstream/chatgbefree/Runtime/ChatGPTRuntimeResolver.m \
+	src/VoiceBridge/LegacyVoiceBridge.m \
+	src/VoiceBridge/LegacyRealtimeVoice.m \
+	src/VoiceBridge/LegacyNativeVoiceLifecycle.m \
+	src/VoiceBridge/LegacySDPTransform.m \
+	src/CopyBridge/LegacyCopyBridge.m \
+	src/ImageBridge/LegacyImageBridge.m \
+	src/ModelSwitcher/LegacyModelSwitcher.m \
+	src/ModelSwitcher/LegacyModelSelectionPersistence.m \
+	src/Runtime/ChatGPTRuntimeResolver.m \
 	src/CitationCompat.m \
 	src/RichMarkupCompat.m \
 	src/RendererCitationGuard.m \

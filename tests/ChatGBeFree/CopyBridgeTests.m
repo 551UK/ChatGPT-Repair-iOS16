@@ -1,7 +1,7 @@
 // ChatGPTRepair: Test copy normalization and Unicode preservation.
 #import <Foundation/Foundation.h>
 
-#import "../CopyBridge/LegacyCopyBridge.h"
+#import "../../src/CopyBridge/LegacyCopyBridge.h"
 
 static void Require(BOOL condition, NSString *message) {
     if (!condition) {

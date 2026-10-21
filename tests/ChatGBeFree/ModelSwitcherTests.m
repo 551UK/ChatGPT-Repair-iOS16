@@ -1,7 +1,7 @@
 // ChatGPTRepair: Test account models and thinking effort translation.
 #import <Foundation/Foundation.h>
 
-#import "../ModelSwitcher/LegacyModelSwitcher.h"
+#import "../../src/ModelSwitcher/LegacyModelSwitcher.h"
 
 static void Require(BOOL condition, NSString *message) {
     if (!condition) {
