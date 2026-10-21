@@ -1,3 +1,4 @@
+# Build, test and publish the unified ChatGPTRepair rootless installer.
 name: Build ChatGPTRepair
 
 on:
@@ -134,7 +135,7 @@ jobs:
           set -euo pipefail
           tag="v$(sed -n 's/^Version:[[:space:]]*//p' control | head -n1)"
           test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '.tag_name')" = "$tag"
-          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag/assets" --jq '[.[] | select(.name == "ChatGPTRepair_iphoneos-arm64.deb")] | length')" -eq 1
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '[.assets[] | select(.name == "ChatGPTRepair_iphoneos-arm64.deb")] | length')" -eq 1
           gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '.[].name' |
           while IFS= read -r old_branch; do
             [ -n "$old_branch" ] || continue
