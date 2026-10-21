@@ -1,10 +1,12 @@
 #import <Foundation/Foundation.h>
 
-extern NSString *CGPagingSelectedID;
+NS_ASSUME_NONNULL_BEGIN
+
+extern NSString * _Nullable CGPagingSelectedID;
 extern NSUInteger CGPagingGeneration;
 
 NSObject *CGPagingStateLock(void);
-NSString *CGPagingConversationID(NSURLRequest *request);
+NSString * _Nullable CGPagingConversationID(NSURLRequest *request);
 NSURLRequest *CGPagingModernRequest(NSURLRequest *original, NSString * _Nullable before);
 NSInteger CGPagingStatus(NSURLResponse * _Nullable response);
 BOOL CGPagingCompatibilityFailure(NSInteger status);
@@ -21,3 +23,5 @@ void CGPagingFetchLegacy(NSURLSessionConfiguration * _Nullable configuration,
                          void (^completion)(NSData * _Nullable,
                                             NSURLResponse * _Nullable,
                                             NSError * _Nullable));
+
+NS_ASSUME_NONNULL_END
