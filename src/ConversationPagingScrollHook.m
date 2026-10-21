@@ -81,18 +81,8 @@ void CGConversationPagingInstallScrollHook(void) {
         return;
     }
     if (!sPagingWatchTimer) {
-        sPagingWatchTimer=[NSTimer scheduledTimerWithTimeInterval:0.20
-            target:[NSBlockOperation blockOperationWithBlock:^{}]
-            selector:@selector(main) userInfo:nil repeats:YES];
-        [sPagingWatchTimer invalidate];
-        sPagingWatchTimer=nil;
-
-        __weak NSTimer *weakTimer=nil;
-        NSTimer *timer=[NSTimer timerWithTimeInterval:0.20 repeats:YES block:^(NSTimer *t) {
-            (void)weakTimer;
-            CGPagingWatchTick(t);
-        }];
-        weakTimer=timer;
+        NSTimer *timer=[NSTimer timerWithTimeInterval:0.20 repeats:YES
+            block:^(NSTimer *t) { CGPagingWatchTick(t); }];
         [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
         sPagingWatchTimer=timer;
     }
