@@ -1,3 +1,4 @@
+// ChatGPTRepair: LiveKit WebRTC voice session and audio transport; based on ChatGBeFree 2.4.0.
 #import "LegacyRealtimeVoice.h"
 #import "LegacyNativeVoiceLifecycle.h"
 #import "LegacySDPTransform.h"

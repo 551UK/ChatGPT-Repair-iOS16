@@ -1,3 +1,4 @@
+// ChatGPTRepair: Native voice presentation lifecycle declarations; based on ChatGBeFree 2.4.0.
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN

@@ -1,3 +1,4 @@
+// ChatGPTRepair: WebRTC session description compatibility transformation; based on ChatGBeFree 2.4.0.
 #import "LegacySDPTransform.h"
 
 static BOOL LVBIsDecimalPayloadType(NSString *value) {

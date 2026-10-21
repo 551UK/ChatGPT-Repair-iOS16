@@ -1,3 +1,4 @@
+// ChatGPTRepair: Legacy WebRTC SDP compatibility declarations; based on ChatGBeFree 2.4.0.
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN

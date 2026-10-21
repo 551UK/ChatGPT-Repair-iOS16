@@ -1,3 +1,4 @@
+// ChatGPTRepair: Legacy voice API, modern response transport, and voice controls; based on ChatGBeFree 2.4.0.
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <substrate.h>
