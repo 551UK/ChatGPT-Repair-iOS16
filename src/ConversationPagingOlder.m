@@ -3,7 +3,6 @@
 #import "ConversationPagingCore.h"
 #include <math.h>
 
-static const CGFloat kLoadOlderDistance=700.0;
 static __weak UIActivityIndicatorView *sPagingSpinner;
 
 @interface NSURLSession (CGConversationPagingOriginal)
@@ -59,6 +58,25 @@ static void CGPagingRestoreScroll(UIScrollView *scroll, CGSize oldSize, CGPoint 
     }
 }
 
+static void CGPagingRefreshVisibleList(UIScrollView *scroll) {
+    if (![scroll isKindOfClass:UICollectionView.class]) return;
+    UICollectionView *list=(UICollectionView *)scroll;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!list.window) return;
+        [list reloadData];
+        [list.collectionViewLayout invalidateLayout];
+        [list setNeedsLayout];
+        [list layoutIfNeeded];
+    });
+}
+
+static void CGPagingScheduleNext(NSTimeInterval delay) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(MAX(0.15,delay)*NSEC_PER_SEC)),
+                   dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
+        CGPagingLoadOlder();
+    });
+}
+
 void CGPagingLoadOlder(void) {
     __block CGConversationPagingState *state=nil;
     __block NSString *cid=nil, *cursor=nil;
@@ -67,8 +85,12 @@ void CGPagingLoadOlder(void) {
     __block NSURLSessionConfiguration *configuration=nil;
     @synchronized(CGPagingStateLock()) {
         state=CGPagingState;
-        if (!state || state.loadingOlder || !state.hasPrevious || !state.startCursor.length ||
-            NSDate.date.timeIntervalSince1970<state.retryNotBefore) return;
+        if (!state || state.loadingOlder || !state.hasPrevious || !state.startCursor.length) return;
+        NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+        if (now<state.retryNotBefore) {
+            CGPagingScheduleNext(state.retryNotBefore-now+0.10);
+            return;
+        }
         state.loadingOlder=YES;
         cid=state.conversationID; generation=state.generation; cursor=state.startCursor;
         originalRequest=state.originalRequest; configuration=[state.configuration copy];
@@ -87,13 +109,27 @@ void CGPagingLoadOlder(void) {
         NSURLSessionDataTask *task=[session cgp_dataTaskWithRequest:pageRequest completionHandler:
             ^(NSData *data, NSURLResponse *response, NSError *error) {
                 [session finishTasksAndInvalidate]; session=nil;
-                CGPagingSetLoading(NO);
                 NSInteger status=CGPagingStatus(response);
-                NSDictionary *page=nil; BOOL pageHasPrevious=NO; NSString *pageCursor=nil; BOOL fallback=NO;
+                NSDictionary *page=nil;
+                NSArray *pageMessages=@[];
+                BOOL pageHasPrevious=NO;
+                NSString *pageCursor=nil;
+                BOOL fallback=NO;
+
                 if (!error && status>=200 && status<300) {
                     page=CGConversationPagingJSONObject(data);
-                    fallback=!page || !CGPagingValidPageRoot(page,&pageHasPrevious,&pageCursor) ||
-                             CGConversationPagingHasVersionMarkers(page);
+                    if (!page || CGConversationPagingHasVersionMarkers(page)) {
+                        fallback=YES;
+                    } else {
+                        id rawMessages=page[@"messages"];
+                        NSDictionary *pageInfo=[page[@"page_info"] isKindOfClass:NSDictionary.class]?page[@"page_info"]:nil;
+                        if (![rawMessages isKindOfClass:NSArray.class] || !pageInfo) {
+                            fallback=YES;
+                        } else {
+                            pageMessages=(NSArray *)rawMessages;
+                            pageCursor=CGConversationPagingStartCursor(page,&pageHasPrevious);
+                        }
+                    }
                 }
 
                 __block NSArray *merged=nil; __block NSDictionary *root=nil; __block NSString *current=nil;
@@ -101,45 +137,104 @@ void CGPagingLoadOlder(void) {
                 __block NSURLSessionConfiguration *savedConfig=nil;
                 __block void (^forward)(NSData *,NSURLResponse *,NSError *)=nil;
                 __block UIScrollView *scroll=nil;
+                __block BOOL loadAnother=NO;
+                __block NSTimeInterval nextDelay=0.45;
+
                 @synchronized(CGPagingStateLock()) {
-                    if (CGPagingState!=state || ![CGPagingSelectedID isEqualToString:cid] || CGPagingGeneration!=generation) return;
-                    state.loadingOlder=NO;
-                    if (status==429 || CGPagingTransientFailure(status,error)) {
-                        state.retryNotBefore=NSDate.date.timeIntervalSince1970+MIN(MAX(4.0,CGPagingRetryAfter(response)),120.0);
+                    if (CGPagingState!=state || ![CGPagingSelectedID isEqualToString:cid] || CGPagingGeneration!=generation) {
+                        CGPagingSetLoading(NO);
                         return;
                     }
-                    if (fallback || CGPagingCompatibilityFailure(status)) {
-                        state.hasPrevious=NO; original=state.originalRequest; forward=[state.completion copy]; savedConfig=[state.configuration copy];
-                    } else if (error || status<200 || status>=300) return;
-                    else {
-                        merged=CGConversationPagingMergeMessages(CGConversationPagingMessages(page),state.messages);
-                        if (!merged.count || (pageHasPrevious && (!pageCursor.length || [pageCursor isEqualToString:state.startCursor]))) {
-                            state.hasPrevious=NO; return;
+                    state.loadingOlder=NO;
+
+                    if (status==429 || CGPagingTransientFailure(status,error)) {
+                        NSTimeInterval delay=MIN(MAX(4.0,CGPagingRetryAfter(response)),120.0);
+                        state.retryNotBefore=NSDate.date.timeIntervalSince1970+delay;
+                        loadAnother=state.hasPrevious;
+                        nextDelay=delay+0.15;
+                    } else if (fallback || CGPagingCompatibilityFailure(status)) {
+                        state.hasPrevious=NO;
+                        original=state.originalRequest;
+                        forward=[state.completion copy];
+                        savedConfig=[state.configuration copy];
+                    } else if (error || status<200 || status>=300) {
+                        state.hasPrevious=NO;
+                    } else if (!pageMessages.count) {
+                        // Empty 200 page is a clean end-of-history signal.
+                        state.hasPrevious=NO;
+                    } else {
+                        NSUInteger oldCount=state.messages.count;
+                        merged=CGConversationPagingMergeMessages(pageMessages,state.messages);
+                        BOOL advanced=merged.count>oldCount;
+                        BOOL cursorAdvanced=pageCursor.length && ![pageCursor isEqualToString:state.startCursor];
+
+                        if (!advanced) {
+                            state.hasPrevious=NO;
+                        } else {
+                            state.messages=merged;
+                            state.loadedOlder=YES;
+                            if (pageCursor.length) state.startCursor=pageCursor;
+
+                            // Some backend variants have omitted or misreported
+                            // has_previous_page. A full page with an advancing
+                            // cursor is safe to probe once more; an empty or
+                            // duplicate page terminates the chain above.
+                            BOOL inferredPrevious=pageHasPrevious ||
+                                (pageMessages.count>=10 && cursorAdvanced);
+                            state.hasPrevious=inferredPrevious;
+                            state.retryNotBefore=NSDate.date.timeIntervalSince1970+0.35;
+
+                            root=state.baseRoot;
+                            current=state.currentNode;
+                            original=state.originalRequest;
+                            template=state.responseTemplate;
+                            forward=[state.completion copy];
+                            scroll=state.scrollView;
+                            loadAnother=inferredPrevious;
                         }
-                        state.messages=merged; state.loadedOlder=YES; state.startCursor=pageCursor;
-                        state.hasPrevious=pageHasPrevious;
-                        state.retryNotBefore=NSDate.date.timeIntervalSince1970+0.8;
-                        root=state.baseRoot; current=state.currentNode; original=state.originalRequest;
-                        template=state.responseTemplate; forward=[state.completion copy]; scroll=state.scrollView;
                     }
                 }
+
                 if (fallback || CGPagingCompatibilityFailure(status)) {
-                    if (original && forward) CGPagingFetchLegacy(savedConfig,original,cid,generation,forward);
+                    CGPagingSetLoading(NO);
+                    if (original && forward) {
+                        CGPagingFetchLegacy(savedConfig,original,cid,generation,
+                            ^(NSData *legacyData,NSURLResponse *legacyResponse,NSError *legacyError) {
+                                if (legacyData.length && !legacyError) {
+                                    forward(legacyData,legacyResponse,nil);
+                                    CGPagingRefreshVisibleList(scroll);
+                                } else {
+                                    forward(legacyData,legacyResponse,legacyError);
+                                }
+                            });
+                    }
                     return;
                 }
-                if (!merged.count || !root || !original || !forward) return;
-                NSData *legacy=CGConversationPagingLegacyData(root,merged,current);
-                if (!legacy.length) return;
-                __block CGSize oldSize=CGSizeZero; __block CGPoint oldOffset=CGPointZero;
-                if (scroll) {
-                    void (^capture)(void)=^{ oldSize=scroll.contentSize; oldOffset=scroll.contentOffset; };
-                    if (NSThread.isMainThread) capture(); else dispatch_sync(dispatch_get_main_queue(),capture);
+
+                if (merged.count && root && original && forward) {
+                    NSData *legacy=CGConversationPagingLegacyData(root,merged,current);
+                    if (legacy.length) {
+                        __block CGSize oldSize=CGSizeZero;
+                        __block CGPoint oldOffset=CGPointZero;
+                        if (scroll) {
+                            void (^capture)(void)=^{ oldSize=scroll.contentSize; oldOffset=scroll.contentOffset; };
+                            if (NSThread.isMainThread) capture(); else dispatch_sync(dispatch_get_main_queue(),capture);
+                        }
+                        forward(legacy,CGPagingLegacyResponse(template,original.URL,legacy.length),nil);
+                        CGPagingRefreshVisibleList(scroll);
+                        if (scroll) CGPagingRestoreScroll(scroll,oldSize,oldOffset);
+                    }
                 }
-                // The 2024 repository's detail completion is intentionally
-                // retained by the paging state and can accept refreshed
-                // synthetic mapping data for the currently selected chat.
-                forward(legacy,CGPagingLegacyResponse(template,original.URL,legacy.length),nil);
-                if (scroll) CGPagingRestoreScroll(scroll,oldSize,oldOffset);
+
+                if (loadAnother) {
+                    // Continue filling the same open conversation until the
+                    // backend reports the true beginning. The newest section
+                    // was already shown, so this work happens progressively in
+                    // the background without blocking initial chat display.
+                    CGPagingScheduleNext(nextDelay);
+                } else {
+                    CGPagingSetLoading(NO);
+                }
             }];
         if (task) [task resume];
         else {
@@ -155,27 +250,7 @@ void CGPagingLoadOlder(void) {
 void CGConversationPagingHandleMessageScroll(UIScrollView *scrollView) {
     if (!scrollView || !scrollView.window) return;
     @synchronized(CGPagingStateLock()) {
-        if (!CGPagingState || !CGPagingState.hasPrevious) return;
+        if (!CGPagingState) return;
         CGPagingState.scrollView=scrollView;
-    }
-
-    CGFloat minimum=-scrollView.adjustedContentInset.top;
-    CGFloat maximum=MAX(minimum,scrollView.contentSize.height-scrollView.bounds.size.height+
-                        scrollView.adjustedContentInset.bottom);
-    CGFloat y=scrollView.contentOffset.y;
-    CGFloat topDistance=fabs(y-minimum);
-    CGFloat bottomDistance=fabs(maximum-y);
-    BOOL contentFits=scrollView.contentSize.height<=scrollView.bounds.size.height+80.0;
-    BOOL userMoving=scrollView.dragging || scrollView.decelerating || scrollView.tracking;
-
-    // BottomAlignedCollectionViewController can report its conversation-start
-    // edge differently depending on the active layout. Treat either visible
-    // edge as a valid paging trigger once the user interacts. If the first page
-    // is shorter than one screen, load older immediately because there is no
-    // scroll gesture capable of reaching another edge.
-    if (contentFits ||
-        (userMoving && ((isfinite(topDistance) && topDistance<kLoadOlderDistance) ||
-                        (isfinite(bottomDistance) && bottomDistance<kLoadOlderDistance)))) {
-        CGPagingLoadOlder();
     }
 }
