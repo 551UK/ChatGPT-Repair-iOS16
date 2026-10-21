@@ -1,3 +1,4 @@
+// ChatGPTRepair: Protect conversation history from rate limits and failed refreshes.
 #import "HistoryPageCache.h"
 #import <CommonCrypto/CommonDigest.h>
 #include <math.h>

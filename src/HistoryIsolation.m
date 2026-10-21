@@ -1,3 +1,4 @@
+// ChatGPTRepair: Legacy conversation-list API and request adaptation.
 /* ChatGPTRepair: production history URL adapter preserving v53 query semantics. */
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>

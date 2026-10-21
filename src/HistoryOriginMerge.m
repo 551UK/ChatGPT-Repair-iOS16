@@ -1,3 +1,4 @@
+// ChatGPTRepair: Merge conversation history across supported origins.
 #import "HistoryOriginMerge.h"
 
 static NSString *const kMergeHeader = @"X-551UK-History-Merge";

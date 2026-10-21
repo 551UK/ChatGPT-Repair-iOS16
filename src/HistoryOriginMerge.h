@@ -1,3 +1,4 @@
+// ChatGPTRepair: Conversation origin merge interface.
 #import <Foundation/Foundation.h>
 
 // Browser history has two independent, authenticated list feeds. The legacy
