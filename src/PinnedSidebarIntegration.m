@@ -19,6 +19,7 @@ extern void CGRCompatibilityEnsureLoaded(void);
 #import "HistoryPageCache.h"
 #import "HistoryOriginMerge.h"
 #import "CitationCompat.h"
+#import "ConversationPagingCompat.h"
 #import "PinnedSectionStore.h"
 #import "PinnedSidebarView.h"
 #import "PinnedLayoutShim.h"
@@ -419,6 +420,9 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
     if (CGIsConversationDetail(request) && !detailRetry) {
         CGDetailSelected(request);
         CGOriginMergeConversationDidOpen();
+        // A delegate-based detail load still invalidates paging state when
+        // switching chats, but keeps the original full-response request.
+        CGConversationPagingPrepareDetailRequest(request,NULL);
     }
     NSURLSessionDataTask *task = [self cgp_dataTaskWithRequest:request];
     CGSeeHistory(self,request);
@@ -429,11 +433,14 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
     BOOL isDetail=CGIsConversationDetail(request);
     BOOL detailRetry=[[request valueForHTTPHeaderField:kDetailRetryHeader] length]>0;
     NSUInteger detailGeneration=0;
+    NSUInteger pagingGeneration=0;
     NSString *detailCID=nil;
+    NSURLRequest *networkRequest=request;
     if (isDetail && !detailRetry) {
         detailCID=request.URL.lastPathComponent;
         detailGeneration=CGDetailSelected(request);
         CGOriginMergeConversationDidOpen();
+        networkRequest=CGConversationPagingPrepareDetailRequest(request,&pagingGeneration);
     }
     void (^forward)(NSData *,NSURLResponse *,NSError *)=completion;
 
@@ -500,15 +507,27 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
         };
     }
     // Resolve modern web citation markers before the 2024 app renders them.
-    // This is deliberately the outermost wrapper so it applies to normal
-    // conversation loads, retry loads, and any other completion-based JSON.
+    // This remains inside the paging wrapper so every synthetic legacy page
+    // gets the same citation/rich-markup compatibility pass.
     if (forward) {
         void (^citationForward)(NSData *,NSURLResponse *,NSError *)=forward;
         forward=^(NSData *data,NSURLResponse *response,NSError *error) {
             citationForward(CGRCitationCompatRewriteJSONData(data),response,error);
         };
     }
-    NSURLSessionDataTask *task = [self cgp_dataTaskWithRequest:request completionHandler:forward];
+
+    // Only completion-based legacy detail loads can be safely paged: the
+    // modern flat messages[] response is converted back to the 2024 mapping
+    // before the app sees it. Delegate-based requests stay completely native.
+    if (forward && pagingGeneration && ![networkRequest.URL isEqual:request.URL]) {
+        void (^pagedForward)(NSData *,NSURLResponse *,NSError *)=forward;
+        NSURLSessionConfiguration *pagingConfig=[self.configuration copy];
+        forward=^(NSData *data,NSURLResponse *response,NSError *error) {
+            CGConversationPagingProcessDetailResponse(
+                pagingConfig,request,pagingGeneration,data,response,error,pagedForward);
+        };
+    }
+    NSURLSessionDataTask *task = [self cgp_dataTaskWithRequest:networkRequest completionHandler:forward];
     CGSeeHistory(self,request);
     return task;
 }
@@ -842,9 +861,11 @@ __attribute__((constructor)) static void CGPinnedBoot(void) {
         if (c && d) method_exchangeImplementations(c,d);
         dispatch_async(dispatch_get_main_queue(), ^{
             CGInstallNativeHook();
+            CGConversationPagingInstallScrollHook();
             [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
                  object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *n) {
                     CGInstallNativeHook();
+                    CGConversationPagingInstallScrollHook();
                     CGRefreshPins();
                  }];
             [[NSNotificationCenter defaultCenter] addObserverForName:kUpdated
