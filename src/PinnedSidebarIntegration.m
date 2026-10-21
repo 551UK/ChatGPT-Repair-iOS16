@@ -420,9 +420,6 @@ static void CGSeeHistory(NSURLSession *session, NSURLRequest *request) {
     if (CGIsConversationDetail(request) && !detailRetry) {
         CGDetailSelected(request);
         CGOriginMergeConversationDidOpen();
-        // A delegate-based detail load still invalidates paging state when
-        // switching chats, but keeps the original full-response request.
-        CGConversationPagingPrepareDetailRequest(request,NULL);
     }
     NSURLSessionDataTask *task = [self cgp_dataTaskWithRequest:request];
     CGSeeHistory(self,request);
@@ -861,11 +858,9 @@ __attribute__((constructor)) static void CGPinnedBoot(void) {
         if (c && d) method_exchangeImplementations(c,d);
         dispatch_async(dispatch_get_main_queue(), ^{
             CGInstallNativeHook();
-            CGConversationPagingInstallScrollHook();
             [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
                  object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *n) {
                     CGInstallNativeHook();
-                    CGConversationPagingInstallScrollHook();
                     CGRefreshPins();
                  }];
             [[NSNotificationCenter defaultCenter] addObserverForName:kUpdated
