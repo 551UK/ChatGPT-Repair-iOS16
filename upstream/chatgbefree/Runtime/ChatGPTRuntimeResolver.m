@@ -1,3 +1,4 @@
+// ChatGPTRepair: Resolve legacy Swift functions and verify binary signatures; based on ChatGBeFree 2.4.0.
 #import "ChatGPTRuntimeResolver.h"
 
 #import <Foundation/Foundation.h>

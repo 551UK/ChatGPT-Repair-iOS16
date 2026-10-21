@@ -1,3 +1,4 @@
+// ChatGPTRepair: ChatGPT runtime symbol resolution declarations; based on ChatGBeFree 2.4.0.
 #pragma once
 
 #include <stddef.h>
