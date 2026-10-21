@@ -84,6 +84,72 @@ static BOOL CGRReplaceProductMarkers(NSMutableString *text, NSString *kind) {
     return changed;
 }
 
+
+static NSString *CGRModernDisplayReplacement(NSString *kind, NSString *payload) {
+    NSData *jsonData=[payload dataUsingEncoding:NSUTF8StringEncoding];
+    id json=jsonData.length
+        ?[NSJSONSerialization JSONObjectWithData:jsonData options:0 error:NULL]:nil;
+
+    if ([kind isEqualToString:@"entity"]) {
+        // entity payloads are usually [type/ref, display name, disambiguation].
+        // Preserve only the human-facing name; never expose the raw entity JSON.
+        if ([json isKindOfClass:NSArray.class]) {
+            NSArray *array=json;
+            if (array.count>=2 && [array[1] isKindOfClass:NSString.class]) {
+                NSString *name=[array[1] stringByTrimmingCharactersInSet:
+                    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (name.length) return name;
+            }
+        }
+        return @"";
+    }
+
+    if ([kind isEqualToString:@"image_group"]) {
+        // The 2024 app cannot render the modern image-group carousel. Keep a
+        // short readable description instead of dumping the widget payload.
+        id query=[json isKindOfClass:NSDictionary.class]?json[@"query"]:nil;
+        NSMutableArray<NSString *> *labels=[NSMutableArray array];
+        if ([query isKindOfClass:NSString.class]) {
+            NSString *value=[query stringByTrimmingCharactersInSet:
+                [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if (value.length) [labels addObject:value];
+        } else if ([query isKindOfClass:NSArray.class]) {
+            for (id item in (NSArray *)query) {
+                if (![item isKindOfClass:NSString.class]) continue;
+                NSString *value=[item stringByTrimmingCharactersInSet:
+                    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (value.length && ![labels containsObject:value]) [labels addObject:value];
+            }
+        }
+        if (!labels.count) return @"";
+        NSString *joined=[labels componentsJoinedByString:@", "];
+        return [NSString stringWithFormat:@"[Image: %@]",joined];
+    }
+
+    return @"";
+}
+
+static BOOL CGRReplaceModernDisplayMarker(NSMutableString *text, NSString *kind) {
+    NSString *prefix=[NSString stringWithFormat:@"\uE200%@\uE202",kind];
+    BOOL changed=NO;
+    while (YES) {
+        NSRange start=[text rangeOfString:prefix];
+        if (start.location==NSNotFound) break;
+        NSUInteger payloadStart=NSMaxRange(start);
+        if (payloadStart>=text.length) break;
+        NSRange end=[text rangeOfString:@"\uE201" options:0
+                                 range:NSMakeRange(payloadStart,text.length-payloadStart)];
+        if (end.location==NSNotFound) break;
+        NSString *payload=[text substringWithRange:
+            NSMakeRange(payloadStart,end.location-payloadStart)];
+        NSString *replacement=CGRModernDisplayReplacement(kind,payload);
+        NSRange whole=NSMakeRange(start.location,NSMaxRange(end)-start.location);
+        [text replaceCharactersInRange:whole withString:replacement ?: @""];
+        changed=YES;
+    }
+    return changed;
+}
+
 static NSString *CGRSafeLabelForURL(NSURL *url) {
     NSString *host=url.host.lowercaseString ?: @"";
     if ([host hasPrefix:@"www."]) host=[host substringFromIndex:4];
@@ -274,6 +340,12 @@ static BOOL CGRRewriteMessage(NSMutableDictionary *message) {
         // raw selections JSON and turn...product IDs.
         CGRReplaceProductMarkers(text,@"products");
         CGRReplaceProductMarkers(text,@"product");
+
+        // Newer rich UI references render as raw private-use payloads in the
+        // 2024 app. Reduce them to readable text without touching ordinary code.
+        CGRReplaceModernDisplayMarker(text,@"entity");
+        CGRReplaceModernDisplayMarker(text,@"image_group");
+
         CGRCollapseAdjacentDuplicateCitationLinks(text);
 
         // Modern DIL rich layouts have no equivalent in the 2024 renderer.
@@ -314,6 +386,8 @@ NSData *CGRCitationCompatRewriteJSONData(NSData *data) {
     static NSData *richNeedle;
     static NSData *buttonNeedle;
     static NSData *iconNeedle;
+    static NSData *entityNeedle;
+    static NSData *imageGroupNeedle;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         referencesNeedle=[@"content_references" dataUsingEncoding:NSUTF8StringEncoding];
@@ -323,6 +397,8 @@ NSData *CGRCitationCompatRewriteJSONData(NSData *data) {
         richNeedle=[@"<AsyncImage" dataUsingEncoding:NSUTF8StringEncoding];
         buttonNeedle=[@"GenUI.openUrl" dataUsingEncoding:NSUTF8StringEncoding];
         iconNeedle=[@"<icon" dataUsingEncoding:NSUTF8StringEncoding];
+        entityNeedle=[@"entity" dataUsingEncoding:NSUTF8StringEncoding];
+        imageGroupNeedle=[@"image_group" dataUsingEncoding:NSUTF8StringEncoding];
     });
     NSRange whole=NSMakeRange(0,data.length);
     BOOL maybeReferences=[data rangeOfData:referencesNeedle options:0 range:whole].location!=NSNotFound;
@@ -332,8 +408,11 @@ NSData *CGRCitationCompatRewriteJSONData(NSData *data) {
     BOOL maybeRich=[data rangeOfData:richNeedle options:0 range:whole].location!=NSNotFound;
     BOOL maybeButton=[data rangeOfData:buttonNeedle options:0 range:whole].location!=NSNotFound;
     BOOL maybeIcon=[data rangeOfData:iconNeedle options:0 range:whole].location!=NSNotFound;
+    BOOL maybeEntity=[data rangeOfData:entityNeedle options:0 range:whole].location!=NSNotFound;
+    BOOL maybeImageGroup=[data rangeOfData:imageGroupNeedle options:0 range:whole].location!=NSNotFound;
     if (!maybeReferences && !maybeFilecite && !maybeCite && !maybeProduct &&
-        !maybeRich && !maybeButton && !maybeIcon) return data;
+        !maybeRich && !maybeButton && !maybeIcon && !maybeEntity && !maybeImageGroup)
+        return data;
 
     NSError *error=nil;
     id root=[NSJSONSerialization JSONObjectWithData:data
