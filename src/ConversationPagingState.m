@@ -1,5 +1,4 @@
 #import "ConversationPagingState.h"
-#import "ConversationPagingCore.h"
 #include <math.h>
 
 static const NSUInteger kConversationPageSize=100;
@@ -9,10 +8,6 @@ static const NSUInteger kConversationPageSize=100;
     completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler;
 @end
 
-@implementation CGConversationPagingState
-@end
-
-CGConversationPagingState *CGPagingState;
 NSString *CGPagingSelectedID;
 NSUInteger CGPagingGeneration=0;
 
@@ -43,27 +38,33 @@ NSURLRequest *CGPagingModernRequest(NSURLRequest *original, NSString *before) {
     if (!cid.length) return original;
     NSURLComponents *parts=[NSURLComponents componentsWithURL:original.URL resolvingAgainstBaseURL:NO];
     if (!parts) return original;
+
     parts.path=[@"/backend-api/conversations/" stringByAppendingString:cid];
     NSMutableArray *items=[NSMutableArray array];
     for (NSURLQueryItem *item in parts.queryItems) {
-        if ([@[@"before",@"num_turns",@"include_has_versions",@"tree_transform"] containsObject:item.name]) continue;
+        if ([@[@"before",@"num_turns",@"include_has_versions",@"tree_transform"] containsObject:item.name])
+            continue;
         [items addObject:item];
     }
     [items addObject:[NSURLQueryItem queryItemWithName:@"include_has_versions" value:@"true"]];
     [items addObject:[NSURLQueryItem queryItemWithName:@"num_turns"
         value:[NSString stringWithFormat:@"%lu",(unsigned long)kConversationPageSize]]];
-    if (before.length) [items addObject:[NSURLQueryItem queryItemWithName:@"before" value:before]];
+    if (before.length)
+        [items addObject:[NSURLQueryItem queryItemWithName:@"before" value:before]];
     parts.queryItems=items;
+
     if (!parts.URL) return original;
     NSMutableURLRequest *request=[original mutableCopy];
     request.URL=parts.URL;
     request.cachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
     [request setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
+    [request setValue:@"no-cache" forHTTPHeaderField:@"Pragma"];
     return request;
 }
 
 NSInteger CGPagingStatus(NSURLResponse *response) {
-    return [response isKindOfClass:NSHTTPURLResponse.class]?((NSHTTPURLResponse *)response).statusCode:0;
+    return [response isKindOfClass:NSHTTPURLResponse.class]
+        ?((NSHTTPURLResponse *)response).statusCode:0;
 }
 
 BOOL CGPagingCompatibilityFailure(NSInteger status) {
@@ -75,20 +76,35 @@ BOOL CGPagingTransientFailure(NSInteger status, NSError *error) {
         status==504 || status==520 || status==522 || status==524) return YES;
     if (!error || ![error.domain isEqualToString:NSURLErrorDomain]) return NO;
     switch (error.code) {
-        case NSURLErrorTimedOut: case NSURLErrorNetworkConnectionLost:
-        case NSURLErrorCannotConnectToHost: case NSURLErrorCannotFindHost:
-        case NSURLErrorNotConnectedToInternet: return YES;
-        default: return NO;
+        case NSURLErrorTimedOut:
+        case NSURLErrorNetworkConnectionLost:
+        case NSURLErrorCannotConnectToHost:
+        case NSURLErrorCannotFindHost:
+        case NSURLErrorNotConnectedToInternet:
+            return YES;
+        default:
+            return NO;
     }
 }
 
 NSTimeInterval CGPagingRetryAfter(NSURLResponse *response) {
     if (![response isKindOfClass:NSHTTPURLResponse.class]) return 0;
     for (id key in ((NSHTTPURLResponse *)response).allHeaderFields) {
-        if (![key isKindOfClass:NSString.class] || [key caseInsensitiveCompare:@"Retry-After"]!=NSOrderedSame) continue;
+        if (![key isKindOfClass:NSString.class] ||
+            [key caseInsensitiveCompare:@"Retry-After"]!=NSOrderedSame) continue;
         id raw=((NSHTTPURLResponse *)response).allHeaderFields[key];
-        double seconds=[[raw description] doubleValue];
-        if (isfinite(seconds) && seconds>0) return seconds;
+
+        NSScanner *scanner=[NSScanner scannerWithString:[raw description]];
+        double seconds=0;
+        if ([scanner scanDouble:&seconds] && scanner.isAtEnd &&
+            isfinite(seconds) && seconds>=0) return seconds;
+
+        NSDateFormatter *formatter=[NSDateFormatter new];
+        formatter.locale=[NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+        formatter.timeZone=[NSTimeZone timeZoneForSecondsFromGMT:0];
+        formatter.dateFormat=@"EEE, dd MMM yyyy HH:mm:ss 'GMT'";
+        NSDate *date=[formatter dateFromString:[raw description]];
+        if (date) return MAX(0,[date timeIntervalSinceNow]);
     }
     return 0;
 }
@@ -97,48 +113,60 @@ NSURLResponse *CGPagingLegacyResponse(NSURLResponse *response, NSURL *legacyURL,
     if (![response isKindOfClass:NSHTTPURLResponse.class] || !legacyURL) return response;
     NSHTTPURLResponse *http=(NSHTTPURLResponse *)response;
     NSMutableDictionary *headers=[http.allHeaderFields mutableCopy] ?: [NSMutableDictionary dictionary];
-    for (id key in [headers.allKeys copy]) if ([key isKindOfClass:NSString.class] &&
-        [(NSString *)key caseInsensitiveCompare:@"Content-Length"]==NSOrderedSame) [headers removeObjectForKey:key];
+    for (id key in [headers.allKeys copy]) {
+        if ([key isKindOfClass:NSString.class] &&
+            [(NSString *)key caseInsensitiveCompare:@"Content-Length"]==NSOrderedSame)
+            [headers removeObjectForKey:key];
+    }
     headers[@"Content-Length"]=[NSString stringWithFormat:@"%lu",(unsigned long)length];
-    return [[NSHTTPURLResponse alloc] initWithURL:legacyURL statusCode:http.statusCode
-        HTTPVersion:@"HTTP/1.1" headerFields:headers];
+    return [[NSHTTPURLResponse alloc] initWithURL:legacyURL
+        statusCode:http.statusCode HTTPVersion:@"HTTP/1.1" headerFields:headers];
 }
 
 BOOL CGPagingStillActive(NSString *cid, NSUInteger generation) {
     @synchronized(CGPagingStateLock()) {
-        return [CGPagingSelectedID isEqualToString:cid] && CGPagingGeneration==generation;
+        return [CGPagingSelectedID isEqualToString:cid] &&
+               CGPagingGeneration==generation;
     }
 }
 
-BOOL CGPagingValidPageRoot(NSDictionary *root, BOOL *hasPrevious, NSString **cursor) {
-    BOOL previous=NO;
-    NSString *start=CGConversationPagingStartCursor(root,&previous);
-    if (hasPrevious) *hasPrevious=previous;
-    if (cursor) *cursor=start;
-    return [root[@"page_info"] isKindOfClass:NSDictionary.class] &&
-           CGConversationPagingMessages(root).count>0 && (!previous || start.length>0);
-}
-
-void CGPagingFetchLegacy(NSURLSessionConfiguration *configuration, NSURLRequest *request,
-                         NSString *cid, NSUInteger generation,
+void CGPagingFetchLegacy(NSURLSessionConfiguration *configuration,
+                         NSURLRequest *request,
+                         NSString *cid,
+                         NSUInteger generation,
                          void (^completion)(NSData *,NSURLResponse *,NSError *)) {
-    NSURLSessionConfiguration *config=[configuration copy] ?: [NSURLSessionConfiguration defaultSessionConfiguration];
+    NSURLSessionConfiguration *config=[configuration copy]
+        ?: [NSURLSessionConfiguration defaultSessionConfiguration];
     if (config.timeoutIntervalForRequest<30) config.timeoutIntervalForRequest=30;
     __block NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
+
     @try {
         NSURLSessionDataTask *task=[session cgp_dataTaskWithRequest:request completionHandler:
             ^(NSData *data, NSURLResponse *response, NSError *error) {
-                [session finishTasksAndInvalidate]; session=nil;
+                [session finishTasksAndInvalidate];
+                session=nil;
                 if (!CGPagingStillActive(cid,generation)) {
-                    completion(nil,nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);
+                    completion(nil,nil,[NSError errorWithDomain:NSURLErrorDomain
+                                                           code:NSURLErrorCancelled
+                                                       userInfo:nil]);
                     return;
                 }
                 completion(data,response,error);
             }];
-        if (task) [task resume];
-        else { [session invalidateAndCancel]; session=nil; completion(nil,nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCannotConnectToHost userInfo:nil]); }
+        if (task) {
+            [task resume];
+        } else {
+            [session invalidateAndCancel];
+            session=nil;
+            completion(nil,nil,[NSError errorWithDomain:NSURLErrorDomain
+                                                   code:NSURLErrorCannotConnectToHost
+                                               userInfo:nil]);
+        }
     } @catch (__unused NSException *exception) {
-        [session invalidateAndCancel]; session=nil;
-        completion(nil,nil,[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCannotConnectToHost userInfo:nil]);
+        [session invalidateAndCancel];
+        session=nil;
+        completion(nil,nil,[NSError errorWithDomain:NSURLErrorDomain
+                                               code:NSURLErrorCannotConnectToHost
+                                           userInfo:nil]);
     }
 }
