@@ -861,11 +861,9 @@ __attribute__((constructor)) static void CGPinnedBoot(void) {
         if (c && d) method_exchangeImplementations(c,d);
         dispatch_async(dispatch_get_main_queue(), ^{
             CGInstallNativeHook();
-            CGConversationPagingInstallScrollHook();
             [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
                  object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *n) {
                     CGInstallNativeHook();
-                    CGConversationPagingInstallScrollHook();
                     CGRefreshPins();
                  }];
             [[NSNotificationCenter defaultCenter] addObserverForName:kUpdated
