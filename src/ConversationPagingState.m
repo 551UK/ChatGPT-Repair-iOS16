@@ -9,10 +9,6 @@ static const NSUInteger kConversationPageSize=100;
     completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler;
 @end
 
-@implementation CGConversationPagingState
-@end
-
-CGConversationPagingState *CGPagingState;
 NSString *CGPagingSelectedID;
 NSUInteger CGPagingGeneration=0;
 
