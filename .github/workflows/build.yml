@@ -168,7 +168,9 @@ jobs:
 
           dpkg-deb --root-owner-group -b build/pkgroot dist/ChatGPTRepair_iphoneos-arm64.deb
           test "$(dpkg-deb -f dist/ChatGPTRepair_iphoneos-arm64.deb Package)" = "com.551uk.chatgptrepair"
-          test "$(dpkg-deb -f dist/ChatGPTRepair_iphoneos-arm64.deb Version)" = "57.6"
+          expected_version="$(sed -n 's/^Version:[[:space:]]*//p' control | head -n1)"
+          test -n "$expected_version"
+          test "$(dpkg-deb -f dist/ChatGPTRepair_iphoneos-arm64.deb Version)" = "$expected_version"
 
           dpkg-deb -x dist/ChatGPTRepair_iphoneos-arm64.deb build/finalcheck
           final="build/finalcheck/var/jb/Library/MobileSubstrate/DynamicLibraries"
