@@ -62,6 +62,31 @@ static NSString *CGRSafeRichLink(NSString *label, NSString *urlString) {
 }
 
 
+static NSString *CGRReplaceDownloadIconRows(NSString *input) {
+    if (![input containsString:@"<row"] ||
+        ![input containsString:@"<icon"] ||
+        !([input containsString:@"name=\"download\""] ||
+          [input containsString:@"name='download'"]) ||
+        ![input containsString:@"]("])
+        return input;
+
+    // Match only the known modern download-row shape. Converting the whole
+    // row means the legacy Markdown renderer never sees raw JSX or the raw URL.
+    NSString *pattern=@"<row\\b[^>]*>\\s*<icon\\b[^>]*\\bname\\s*=\\s*[\"']download[\"'][^>]*/>\\s*(?:\\*\\*)?\\[([^\\]\\n]+)\\]\\((https?://[^\\s\\)]+)\\)(?:\\*\\*)?\\s*</row>";
+    return CGRReplace(input,pattern,
+                      NSRegularExpressionCaseInsensitive |
+                      NSRegularExpressionDotMatchesLineSeparators,
+                      ^NSString *(NSTextCheckingResult *match,NSString *text) {
+        NSString *label=CGRTrim(CGRGroup(match,1,text) ?: @"");
+        NSString *url=CGRGroup(match,2,text);
+        if (!label.length) label=@"Download";
+        NSString *display=[label hasPrefix:@"↓"] ? label
+            : [@"↓ " stringByAppendingString:label];
+        return CGRSafeRichLink(display,url);
+    });
+}
+
+
 static NSString *CGRReplaceGenUIButtons(NSString *input) {
     if (![input containsString:@"<button"] || ![input containsString:@"GenUI.openUrl("])
         return input;
@@ -191,6 +216,10 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
             return body;
         return CGRGroup(match,0,text);
     });
+    // Collapse the known icon + Markdown-link download row to one
+    // tappable legacy link before stripping any remaining layout tags.
+    output=CGRReplaceDownloadIconRows(output);
+
     // Modern response buttons degrade to the same rich URL token understood
     // by the existing LinkFix. Parse rather than regex the nested arrow-call syntax.
     output=CGRReplaceGenUIButtons(output);
