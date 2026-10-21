@@ -163,7 +163,18 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
                     [original containsString:@"product"];
     BOOL hasGenUIButton=[original containsString:@"<button"] &&
                         [original containsString:@"GenUI.openUrl("];
-    if (!((hasLayout && (hasImage || hasStructuredLink)) || hasBinding || hasGenUIButton))
+    // Newer responses can also send a compact download row made from a
+    // structural <row>, a download <icon>, and an ordinary Markdown link.
+    // ChatGPT 1.2024.200 prints that component literally unless we unwrap it.
+    BOOL hasDownloadIcon=[original containsString:@"<icon"] &&
+        ([original containsString:@"name=\"download\""] ||
+         [original containsString:@"name='download'"]);
+    BOOL hasMarkdownHTTPLink=([original containsString:@"](https://"] ||
+                              [original containsString:@"](http://"]);
+    BOOL hasIconMarkdownLink=hasDownloadIcon && hasMarkdownHTTPLink &&
+                             [original containsString:@"</row>"];
+    if (!((hasLayout && (hasImage || hasStructuredLink || hasIconMarkdownLink)) ||
+          hasBinding || hasGenUIButton))
         return original;
 
     NSString *output=original;
@@ -183,6 +194,17 @@ NSString *CGRLegacyReadableRichMarkup(NSString *original) {
     // Modern response buttons degrade to the same rich URL token understood
     // by the existing LinkFix. Parse rather than regex the nested arrow-call syntax.
     output=CGRReplaceGenUIButtons(output);
+
+    // The old renderer has no equivalent for modern inline icon components.
+    // Preserve the meaning of the download icon without leaking raw JSX.
+    output=CGRReplace(output,@"<icon\\b([^>]*?)/>",
+                      NSRegularExpressionDotMatchesLineSeparators,
+                      ^NSString *(NSTextCheckingResult *match,NSString *text) {
+        NSString *attrs=CGRGroup(match,1,text);
+        NSString *name=[CGRAttribute(attrs,@"name") lowercaseString];
+        return [name isEqualToString:@"download"]?@"↓ ":@"";
+    });
+
     output=CGRReplace(output,@"<badge\\b[^>]*>(.*?)</badge>",
                       NSRegularExpressionDotMatchesLineSeparators,
                       ^NSString *(NSTextCheckingResult *match,NSString *text) {
