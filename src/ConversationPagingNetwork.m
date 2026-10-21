@@ -205,7 +205,6 @@ NSURLRequest *CGConversationPagingPrepareDetailRequest(NSURLRequest *originalReq
         if (![CGPagingSelectedID isEqualToString:cid]) {
             CGPagingSelectedID=[cid copy];
             CGPagingGeneration++;
-            CGPagingState=nil;
         }
         if (generationOut) *generationOut=CGPagingGeneration;
     }
