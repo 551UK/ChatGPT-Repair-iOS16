@@ -203,6 +203,23 @@ int main(void) {
         NSCAssert([genOut containsString:@"\uE200url\uE202Download v56.6 DEB\uE202https://github.com/551UK/ChatGPT-Repair-iOS16/releases/download/v56.6/ChatGPTRepair_56.6_iphoneos-arm64.deb\uE201"],
                   @"GenUI download did not become a rich clickable URL token");
 
+
+        // Screenshot regression: the modern row/icon wrapper must collapse to
+        // one clean clickable label instead of exposing JSX + Markdown + URL.
+        NSString *downloadRow=@"<row align=\"center\" gap={3}>\n"
+            "<icon name=\"download\" size=\"lg\"/>\n"
+            "**[Download CallBar Lock Screen Diagnostic DEB](https://github.com/551UK/CallBar-IOS16/releases/download/callbar-lockdiag-4/com.551uk.callbarlockdiag_1.0-1_iphoneos-arm64.deb)**\n"
+            "</row>";
+        NSDictionary *downloadRowRoot=@{@"message":@{
+            @"content":@{@"parts":@[downloadRow]},@"metadata":@{}
+        }};
+        NSString *downloadRowOut=Part(JSONObj(CGRCitationCompatRewriteJSONData(JSONData(downloadRowRoot))));
+        NSCAssert(![downloadRowOut containsString:@"<row"],@"raw download row leaked");
+        NSCAssert(![downloadRowOut containsString:@"<icon"],@"raw download icon leaked");
+        NSCAssert(![downloadRowOut containsString:@"**["],@"raw Markdown link leaked");
+        NSCAssert([downloadRowOut containsString:@"\uE200url\uE202↓ Download CallBar Lock Screen Diagnostic DEB\uE202https://github.com/551UK/CallBar-IOS16/releases/download/callbar-lockdiag-4/com.551uk.callbarlockdiag_1.0-1_iphoneos-arm64.deb\uE201"],
+                  @"download row was not converted to one tappable legacy link");
+
         NSLog(@"PASS: citations compact cleanly, product markers render cleanly, and normal download links stay intact");
     }
     return 0;
