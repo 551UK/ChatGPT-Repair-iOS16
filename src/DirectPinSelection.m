@@ -1,3 +1,4 @@
+// ChatGPTRepair: Open pinned conversations directly in the legacy app.
 /* 551UK / GPL-3.0. Construct an independent native selection, without editing
  * history JSON or inserting into either HistoryViewModel dictionary.
  * Every private address and layout below is guarded by the framework UUID.

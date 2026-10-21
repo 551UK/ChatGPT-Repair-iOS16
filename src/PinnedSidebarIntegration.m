@@ -1,3 +1,4 @@
+// ChatGPTRepair: Integrate pinned chats and history into the legacy sidebar.
 /*
  * PinnedSidebarIntegration.m — 551UK — GPLv3
  * Experimental native bridge for ChatGPT 1.2024.200.

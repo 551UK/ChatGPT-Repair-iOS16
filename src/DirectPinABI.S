@@ -1,3 +1,4 @@
+/* ChatGPTRepair: ARM64 bridge for native pinned conversation selection. */
 // ARM64 Swift ABI adapters for the UUID-checked 1.2024.200 framework.
 .text
 .p2align 2

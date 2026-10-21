@@ -1,3 +1,4 @@
+// ChatGPTRepair: Pinned conversation service interface.
 // PinService.h — 551UK, GPL-3.0
 // Read-only pinned-conversation data model for legacy ChatGPT iOS 16.
 // Does not install UI hooks or change existing conversation history.

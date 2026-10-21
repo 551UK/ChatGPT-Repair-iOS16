@@ -1,3 +1,4 @@
+// ChatGPTRepair: Create, remove, and retrieve pinned conversation records.
 // PinService.m — 551UK, GPL-3.0
 // Source-only service for the browser-observed GET
 // /backend-api/pins?item_type=conversation.
