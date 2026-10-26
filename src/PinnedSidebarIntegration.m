@@ -7,8 +7,6 @@
  * and presents pinned chats above the history rows.
  */
 #import <UIKit/UIKit.h>
-#import "ConversationLiveSync.h"
-
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -782,14 +780,12 @@ static void CGHistoryAppear(id self, SEL command, BOOL animated) {
     ((void(*)(id, SEL, BOOL))sOriginalAppear)(self,command,animated);
     if ([self isKindOfClass:UIViewController.class])
         sVisibleHistoryController=(UIViewController *)self;
-    CGChatManualSetHistoryVisible(YES);
     CGRefreshPins();
     CGRender(self);
 }
 static void CGHistoryDisappear(id self, SEL command, BOOL animated) {
     if (sVisibleHistoryController==(UIViewController *)self)
         sVisibleHistoryController=nil;
-    CGChatManualSetHistoryVisible(NO);
     if (sOriginalDisappear)
         ((void(*)(id,SEL,BOOL))sOriginalDisappear)(self,command,animated);
 }

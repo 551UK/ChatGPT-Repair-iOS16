@@ -14,7 +14,6 @@ static NSObject *CGManualLock(void) {
 
 static NSString *sSelectedConversation;
 static BOOL sConversationLoaded;
-static BOOL sHistoryVisible;
 static BOOL sRefreshInProgress;
 static NSUInteger sSelectionGeneration;
 static UIButton *sRefreshButton;
@@ -69,8 +68,7 @@ static void CGManualUpdateButton(void) {
     }
     BOOL ready=NO;
     @synchronized(CGManualLock()) {
-        ready=sSelectedConversation.length && sConversationLoaded &&
-              !sHistoryVisible;
+        ready=sSelectedConversation.length && sConversationLoaded;
     }
     if (!ready || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive) {
         sRefreshButton.hidden=YES;
@@ -142,7 +140,7 @@ static void CGManualUpdateButton(void) {
     NSUInteger generation=0;
     @synchronized(CGManualLock()) {
         if (sRefreshInProgress || !sConversationLoaded ||
-            sHistoryVisible || !sSelectedConversation.length) return;
+            !sSelectedConversation.length) return;
         sRefreshInProgress=YES;
         identifier=[sSelectedConversation copy];
         generation=sSelectionGeneration;
@@ -172,11 +170,6 @@ static void CGManualUpdateButton(void) {
 }
 @end
 
-void CGChatManualSetHistoryVisible(BOOL visible) {
-    @synchronized(CGManualLock()) { sHistoryVisible=visible; }
-    CGManualUpdateButton();
-}
-
 void CGChatSyncTrackDetail(NSURLRequest *request,
                            NSURLSessionConfiguration *configuration) {
     (void)configuration;
@@ -190,7 +183,10 @@ void CGChatSyncTrackDetail(NSURLRequest *request,
         sRefreshInProgress=NO;
     }
     CGManualLog(@"MANUAL_CHAT_SELECTED");
-    CGManualUpdateButton();
+    // Avoid touching UIKit while the original conversation request is opening.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (sRefreshButton) sRefreshButton.hidden=YES;
+    });
 }
 
 void CGChatSyncMarkDelivered(NSURLRequest *request, NSDictionary *root) {
@@ -201,7 +197,12 @@ void CGChatSyncMarkDelivered(NSURLRequest *request, NSDictionary *root) {
         if (![sSelectedConversation isEqualToString:cid]) return;
         sConversationLoaded=YES;
     }
-    CGManualUpdateButton();
+    // Loading and merging older pages can take time. Draw only after the
+    // current network completion has returned to the app and UIKit is idle.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1500*NSEC_PER_MSEC)),
+                   dispatch_get_main_queue(), ^{
+        CGManualUpdateButton();
+    });
 }
 
 __attribute__((constructor)) static void CGManualInstall(void) {

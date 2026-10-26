@@ -61,7 +61,6 @@ assert "CGConversationPagingHasVersionMarkers" not in (root/"src/ConversationPag
 sync=(root/"src/ConversationLiveSync.m").read_text()
 assert "CGChatSyncTrackDetail" in sync
 assert "CGChatSyncMarkDelivered" in sync
-assert "CGChatManualSetHistoryVisible" in sync
 assert "src/ConversationLiveSync.m" in (root/"Makefile").read_text()
 assert "CGNativeRefreshConversation(identifier" in sync
 assert "MANUAL_REFRESH_TAPPED" in sync
@@ -79,8 +78,9 @@ for forbidden in ("CGSyncPoll", "CGSyncSchedule", "CGSyncReopenCurrentConversati
                   "CG46OpenPin", "NATIVE_RESELECT", "dataTaskWithRequest:",
                   "CGPagingModernRequest", "POLL_OK", "Live reply preview"):
     assert forbidden not in sync, forbidden
-assert "CGChatManualSetHistoryVisible(YES)" in (root/"src/PinnedSidebarIntegration.m").read_text()
-assert "CGChatManualSetHistoryVisible(NO)" in (root/"src/PinnedSidebarIntegration.m").read_text()
+assert "CGChatManualSetHistoryVisible" not in (root/"src/PinnedSidebarIntegration.m").read_text()
+assert "1500*NSEC_PER_MSEC" in sync
+assert "CGManualUpdateButton();" not in sync.split('void CGChatSyncTrackDetail(',1)[1].split('void CGChatSyncMarkDelivered(',1)[0]
 assert "ConversationLivePreview" not in (root/"Makefile").read_text()
 assert not (root/"src/ConversationLivePreview.m").exists()
 assert "kDiagnosticMaxRenderMessages" not in paging_network
