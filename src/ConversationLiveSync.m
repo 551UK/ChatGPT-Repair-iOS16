@@ -16,6 +16,7 @@ static NSString *sSelectedConversation;
 static BOOL sConversationLoaded;
 static BOOL sRefreshInProgress;
 static NSUInteger sSelectionGeneration;
+static NSUInteger sAutoHydratedGeneration=NSUIntegerMax;
 static UIButton *sRefreshButton;
 static UIActivityIndicatorView *sRefreshSpinner;
 
@@ -212,6 +213,7 @@ void CGChatSyncTrackDetail(NSURLRequest *request,
         if ([sSelectedConversation isEqualToString:cid]) return;
         sSelectedConversation=[cid copy];
         sSelectionGeneration++;
+        sAutoHydratedGeneration=NSUIntegerMax;
         sConversationLoaded=NO;
         sRefreshInProgress=NO;
     }
@@ -236,6 +238,32 @@ void CGChatSyncMarkDelivered(NSURLRequest *request, NSDictionary *root) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(5*NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         CGManualUpdateButton();
+    });
+}
+
+// This is a one-off completion of the initial chat open, not a timer,
+// streaming poll or change to the user-controlled refresh button.
+void CGChatSyncHydrateBackgroundHistory(NSURLRequest *request) {
+    NSString *cid=CGPagingConversationID(request);
+    if (!cid.length) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        BOOL selected=NO;
+        @synchronized(CGManualLock()) {
+            selected=[sSelectedConversation isEqualToString:cid] &&
+                sConversationLoaded && !sRefreshInProgress &&
+                sAutoHydratedGeneration!=sSelectionGeneration;
+            if (selected) sAutoHydratedGeneration=sSelectionGeneration;
+        }
+        if (!selected || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive) {
+            CGManualLog(@"BACKGROUND_HISTORY_REFRESH_SKIPPED");
+            return;
+        }
+        BOOL started=CGNativeRefreshConversation(cid,^(BOOL success) {
+            CGManualLog(success?@"BACKGROUND_HISTORY_REFRESH_COMPLETED":
+                                  @"BACKGROUND_HISTORY_REFRESH_FAILED");
+        });
+        CGManualLog(started?@"BACKGROUND_HISTORY_REFRESH_STARTED":
+                            @"BACKGROUND_HISTORY_REFRESH_UNAVAILABLE");
     });
 }
 
