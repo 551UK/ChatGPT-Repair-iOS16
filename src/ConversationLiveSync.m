@@ -18,7 +18,9 @@ static NSObject *CGSyncLock(void) {
     dispatch_once(&once, ^{ lock=[NSObject new]; });
     return lock;
 }
-static __weak UIViewController *sSyncRecentHistoryController;
+// Retain this one lightweight controller: the app releases it when the sidebar closes.
+// Without the strong reference the native selection callback is unavailable.
+static UIViewController *sSyncRecentHistoryController;
 static NSString *sSyncID;
 static NSString *sSyncTitle;
 static NSURLRequest *sSyncRequest;
@@ -34,6 +36,9 @@ static BOOL sSyncDelivered;
 static BOOL sSyncRequestActive;
 static BOOL sSyncBusy;
 static NSTimeInterval sSyncLastUIRefresh;
+static NSUInteger sSyncLastObservedSignature;
+static BOOL sSyncHasObservedSignature;
+static BOOL sSyncAwaitingReload;
 
 static void CGSyncLog(NSString *event, NSInteger status, NSUInteger count) {
     @try {
@@ -106,10 +111,12 @@ void CGChatSyncRememberHistoryController(UIViewController *controller) {
     if (!controller ||
         ![NSStringFromClass(controller.class) containsString:@"HistoryViewController"])
         return;
+    BOOL changed=NO;
     @synchronized(CGSyncLock()) {
-        sSyncRecentHistoryController=controller;
+        changed=sSyncRecentHistoryController!=controller;
+        if (changed) sSyncRecentHistoryController=controller;
     }
-    CGSyncLog(@"HISTORY_CONTROLLER_CACHED",0,1);
+    if (changed) CGSyncLog(@"HISTORY_CONTROLLER_RETAINED",0,1);
 }
 static UIViewController *CGSyncFindHistoryController(UIViewController *vc,
                                                     NSMutableSet *visited) {
@@ -148,14 +155,14 @@ static BOOL CGSyncReopenCurrentConversation(NSString *identifier, NSString *titl
     }
     NSString *safeTitle=title.length?title:@"Chat";
     if (cached) {
-        CGSyncLog(@"RESELECT_CACHED_ATTEMPT",0,1);
+        CGSyncLog(@"RESELECT_RETAINED_ATTEMPT",0,1);
         @try {
             if (CG46OpenPin(cached,identifier,safeTitle)) {
-                CGSyncLog(@"RESELECT_CACHED_SUCCESS",0,1);
+                CGSyncLog(@"RESELECT_NATIVE_DISPATCHED",0,1);
                 return YES;
             }
         } @catch (__unused NSException *exception) {}
-        CGSyncLog(@"RESELECT_CACHED_FAILED",0,0);
+        CGSyncLog(@"RESELECT_RETAINED_FAILED",0,0);
     }
     NSMutableSet *visited=[NSMutableSet set];
     for (UIWindow *window in UIApplication.sharedApplication.windows) {
@@ -164,7 +171,7 @@ static BOOL CGSyncReopenCurrentConversation(NSString *identifier, NSString *titl
         CGChatSyncRememberHistoryController(history);
         @try {
             if (CG46OpenPin(history,identifier,safeTitle)) {
-                CGSyncLog(@"RESELECT_WINDOW_SUCCESS",0,1);
+                CGSyncLog(@"RESELECT_WINDOW_DISPATCHED",0,1);
                 return YES;
             }
         } @catch (__unused NSException *exception) {}
@@ -322,27 +329,38 @@ static void CGSyncPoll(NSUInteger generation) {
             ?CGConversationPagingJSONObject(data):nil;
         BOOL busy=NO;
         NSUInteger hash=root?CGSyncFingerprint(root,&busy):0;
-        BOOL changed=NO, shouldRetry=NO;
+        BOOL changed=NO, firstObserved=NO, shouldRetry=NO;
         @synchronized(CGSyncLock()) {
             if (generation!=sSyncGeneration) return;
             sSyncRequestActive=NO;
             if (root) {
-                if (sSyncHasSignature && sSyncSignature!=hash && sSyncDelivered)
-                    changed=YES;
-                sSyncSignature=hash;
-                sSyncHasSignature=YES;
+                // Compare with the last conversation actually DELIVERED to the app,
+                // not the last background network check.
+                BOOL stale=sSyncHasSignature && sSyncSignature!=hash && sSyncDelivered;
+                firstObserved=stale && (!sSyncHasObservedSignature ||
+                                         sSyncLastObservedSignature!=hash);
+                sSyncLastObservedSignature=hash;
+                sSyncHasObservedSignature=YES;
                 sSyncBusy=busy;
+                if (stale) {
+                    NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+                    // Retrying without a delivered response is essential if a
+                    // native selection dispatch was ignored.
+                    if (now-sSyncLastUIRefresh>=20) {
+                        changed=YES;
+                        sSyncLastUIRefresh=now;
+                        sSyncAwaitingReload=YES;
+                    }
+                } else {
+                    sSyncAwaitingReload=NO;
+                }
             }
             shouldRetry=YES;
-            if (changed) {
-                NSTimeInterval now=NSDate.date.timeIntervalSince1970;
-                if (now-sSyncLastUIRefresh<8) changed=NO;
-                else sSyncLastUIRefresh=now;
-            }
         }
         CGSyncLog(root?@"POLL_OK":@"POLL_FAILED",status,root?CGConversationPagingMessages(root).count:0);
         if (changed) {
-            CGSyncLog(@"REMOTE_MESSAGE_CHANGED",status,busy?1:0);
+            CGSyncLog(firstObserved?@"REMOTE_MESSAGE_CHANGED":@"STALE_RENDER_RETRY",
+                      status,busy?1:0);
             CGSyncIndicator(@"Updating",YES);
             CGSyncRequestUIRefresh();
         }
@@ -371,7 +389,11 @@ void CGChatSyncTrackDetail(NSURLRequest *request, NSURLSessionConfiguration *con
     if (!cid.length || !request) return;
     NSUInteger generation=0;
     @synchronized(CGSyncLock()) {
-        if ([sSyncID isEqualToString:cid] && sSyncRequest) return;
+        if ([sSyncID isEqualToString:cid] && sSyncRequest) {
+            CGSyncLog(sSyncAwaitingReload?@"RELOAD_DETAIL_REQUEST_RECEIVED":
+                      @"SAME_CHAT_DETAIL_REQUEST",0,0);
+            return;
+        }
         sSyncID=[cid copy];
         sSyncTitle=nil;
         sSyncRequest=[request copy];
@@ -381,6 +403,8 @@ void CGChatSyncTrackDetail(NSURLRequest *request, NSURLSessionConfiguration *con
         sSyncPolls=0;
         sSyncRequestActive=NO;
         sSyncHasSignature=NO;
+        sSyncHasObservedSignature=NO;
+        sSyncAwaitingReload=NO;
         sSyncDelivered=NO;
         sSyncBusy=NO;
         sSyncLastUIRefresh=0;
@@ -398,16 +422,17 @@ void CGChatSyncMarkDelivered(NSURLRequest *request, NSDictionary *root) {
         if (![sSyncID isEqualToString:cid]) return;
         if ([root[@"title"] isKindOfClass:NSString.class])
             sSyncTitle=[root[@"title"] copy];
-        if (!sSyncHasSignature) {
-            sSyncSignature=signature;
-            sSyncHasSignature=YES;
-        }
+        // This is the only point where a changed server snapshot can be
+        // acknowledged as actually delivered to the old conversation renderer.
+        sSyncSignature=signature;
+        sSyncHasSignature=YES;
+        sSyncAwaitingReload=NO;
         BOOL firstDelivery=!sSyncDelivered;
         sSyncDelivered=YES;
         if (busy) sSyncBusy=YES;
         if (firstDelivery) token=sSyncGeneration;
     }
-    CGSyncLog(@"INITIAL_CONVERSATION_READY",0,busy?1:0);
+    CGSyncLog(@"CONVERSATION_DELIVERED",0,busy?1:0);
     if (token) CGSyncSchedule(token,5);
 }
 

@@ -82,4 +82,14 @@ assert "RESELECT_CACHED_SUCCESS" in sync
 assert "RESELECT_NO_HISTORY_CONTROLLER" in sync
 assert "sSyncRecentHistoryController" in sync
 assert "canInvoke=vc.isViewLoaded" in sync
+# Sync4 preserves the history controller after the sidebar disappears and
+# retries remote changes until a new conversation detail response is delivered.
+assert "static UIViewController *sSyncRecentHistoryController;" in sync
+assert "static __weak UIViewController *sSyncRecentHistoryController;" not in sync
+assert "STALE_RENDER_RETRY" in sync
+assert "RESELECT_RETAINED_ATTEMPT" in sync
+assert "RELOAD_DETAIL_REQUEST_RECEIVED" in sync
+assert "CONVERSATION_DELIVERED" in sync
+assert "sSyncSignature=hash" not in sync
+assert "sSyncSignature=signature" in sync
 print("PASS: clean source-only tree and existing repair regression guards")
