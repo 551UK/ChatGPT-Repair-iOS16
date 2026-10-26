@@ -43,6 +43,14 @@ static void CGManualLog(NSString *event) {
 }
 void CGChatSyncLogEvent(NSString *event) { CGManualLog(event); }
 
+static CGRect CGManualSpinnerFrame(UIView *host) {
+    const CGFloat side=20.0;
+    CGRect bounds=host.bounds;
+    return CGRectMake(floor((CGRectGetWidth(bounds)-side)/2.0),
+                      floor((CGRectGetHeight(bounds)-side)/2.0),
+                      side,side);
+}
+
 static void CGManualSetWorking(BOOL working) {
     if (!NSThread.isMainThread) {
         dispatch_async(dispatch_get_main_queue(), ^{ CGManualSetWorking(working); });
@@ -80,15 +88,21 @@ static void CGManualUpdateButton(void) {
     }
     if (!ready || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive) {
         sRefreshButton.hidden=YES;
+        sRefreshSpinner.hidden=YES;
         return;
     }
 
     UIWindow *window=UIApplication.sharedApplication.keyWindow;
     if (!window) window=UIApplication.sharedApplication.windows.firstObject;
-    if (!window) { sRefreshButton.hidden=YES; return; }
+    if (!window) {
+        sRefreshButton.hidden=YES;
+        sRefreshSpinner.hidden=YES;
+        return;
+    }
     UIView *host=window.rootViewController.view ?: window;
     if (!sRefreshButton || sRefreshButton.superview!=host) {
         [sRefreshButton removeFromSuperview];
+        [sRefreshSpinner removeFromSuperview];
         UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];
         button.translatesAutoresizingMaskIntoConstraints=YES;
         button.backgroundColor=UIColor.clearColor;
@@ -121,21 +135,28 @@ static void CGManualUpdateButton(void) {
         UIActivityIndicatorView *spinner=[[UIActivityIndicatorView alloc]
             initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
         spinner.translatesAutoresizingMaskIntoConstraints=YES;
-        spinner.frame=CGRectMake(12,12,20,20);
+        // Keep the same 20pt spinner, but show it at the exact midpoint of
+        // the visible chat/root view instead of inside the top-right button.
+        spinner.frame=CGManualSpinnerFrame(host);
         spinner.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin |
-            UIViewAutoresizingFlexibleRightMargin;
+            UIViewAutoresizingFlexibleRightMargin |
+            UIViewAutoresizingFlexibleTopMargin |
+            UIViewAutoresizingFlexibleBottomMargin;
         spinner.hidesWhenStopped=YES;
         spinner.color=UIColor.whiteColor;
         spinner.userInteractionEnabled=NO;
-        [button addSubview:spinner];
         [host addSubview:button];
+        [host addSubview:spinner];
         sRefreshButton=button;
         sRefreshSpinner=spinner;
         CGManualSetWorking(sRefreshInProgress);
     }
     sRefreshButton.frame=CGManualButtonFrame(host,window);
+    sRefreshSpinner.frame=CGManualSpinnerFrame(host);
     sRefreshButton.hidden=NO;
+    CGManualSetWorking(sRefreshInProgress);
     [host bringSubviewToFront:sRefreshButton];
+    if (sRefreshInProgress) [host bringSubviewToFront:sRefreshSpinner];
 }
 
 @implementation CGManualRefreshAction
@@ -198,6 +219,7 @@ void CGChatSyncTrackDetail(NSURLRequest *request,
     // Avoid touching UIKit while the original conversation request is opening.
     dispatch_async(dispatch_get_main_queue(), ^{
         if (sRefreshButton) sRefreshButton.hidden=YES;
+        if (sRefreshSpinner) sRefreshSpinner.hidden=YES;
     });
 }
 
@@ -232,6 +254,7 @@ __attribute__((constructor)) static void CGManualInstall(void) {
             object:nil queue:NSOperationQueue.mainQueue
             usingBlock:^(__unused NSNotification *note) {
                 sRefreshButton.hidden=YES;
+                sRefreshSpinner.hidden=YES;
             }];
     });
 }

@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, test/large-chat-paged-recovery]
     paths:
       - 'src/**'
       - 'Makefile'
@@ -85,6 +85,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ChatGPTRepair-source-only-test
+          path: dist/ChatGPTRepair_iphoneos-arm64.deb
+
+      - name: Upload Manual6 branch installer
+        if: github.ref == 'refs/heads/test/large-chat-paged-recovery'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatGPTRepair-Manual6
           path: dist/ChatGPTRepair_iphoneos-arm64.deb
 
       - name: Publish clean release
