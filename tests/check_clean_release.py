@@ -44,4 +44,15 @@ for path in root.rglob('*'):
     if path.is_file():
         assert path.suffix.lower() not in ('.deb','.dylib','.a','.o'), path
 
+# Large-chat diagnostic build must page in small batches and never use full-chat
+# fallback after successfully receiving the modern conversation's newest page.
+paging_state=(root/"src/ConversationPagingState.m").read_text()
+paging_network=(root/"src/ConversationPagingNetwork.m").read_text()
+assert "kConversationPageSize=20;" in paging_state
+assert "ChatGPTRepairLargeChat.log" in paging_network
+assert "FIRST_PAGE_RETRY_SCHEDULED" in paging_network
+assert "PARTIAL_HISTORY" in paging_network
+older=paging_network.split("static void CGPagingRetryOlder(",1)[1].split(
+    "NSURLRequest *CGConversationPagingPrepareDetailRequest(",1)[0]
+assert "CGPagingFinishFallback(" not in older
 print("PASS: clean source-only tree and existing repair regression guards")
