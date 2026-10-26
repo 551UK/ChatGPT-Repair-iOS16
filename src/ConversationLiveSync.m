@@ -98,7 +98,10 @@ static void CGSyncIndicator(NSString *state, BOOL visible) {
             sSyncLabel=label;
         }
         CGFloat safe=window.safeAreaInsets.top;
-        sSyncOverlay.frame=CGRectMake(window.bounds.size.width-140,safe+56,124,30);
+        // Keep the activity pill horizontally centred just below the chat header.
+        CGFloat pillWidth=CGRectGetWidth(sSyncOverlay.bounds);
+        CGFloat centredX=(CGRectGetWidth(window.bounds)-pillWidth)*0.5;
+        sSyncOverlay.frame=CGRectMake(centredX,safe+56,pillWidth,30);
         sSyncLabel.text=state ?: @"Syncing";
         sSyncOverlay.hidden=NO;
         [sSyncSpinner startAnimating];

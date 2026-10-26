@@ -92,4 +92,8 @@ assert "RELOAD_DETAIL_REQUEST_RECEIVED" in sync
 assert "CONVERSATION_DELIVERED" in sync
 assert "sSyncSignature=hash" not in sync
 assert "sSyncSignature=signature" in sync
+# Overlay is centred below the header, without altering sync request handling.
+assert "CGFloat centredX=(CGRectGetWidth(window.bounds)-pillWidth)*0.5;" in sync
+assert "CGRectMake(centredX,safe+56,pillWidth,30)" in sync
+assert "window.bounds.size.width-140" not in sync
 print("PASS: clean source-only tree and existing repair regression guards")
