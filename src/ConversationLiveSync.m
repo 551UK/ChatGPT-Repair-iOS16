@@ -3,6 +3,7 @@
 #import "ConversationLiveSync.h"
 #import "ConversationPagingState.h"
 #import "ConversationPagingCore.h"
+#import "ConversationLivePreview.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -39,6 +40,9 @@ static NSTimeInterval sSyncLastUIRefresh;
 static NSUInteger sSyncLastObservedSignature;
 static BOOL sSyncHasObservedSignature;
 static BOOL sSyncAwaitingReload;
+static NSUInteger sSyncPreviewHash;
+static NSTimeInterval sSyncLastTextChange;
+static NSUInteger sSyncLastPreviewLength;
 
 static void CGSyncLog(NSString *event, NSInteger status, NSUInteger count) {
     @try {
@@ -223,6 +227,43 @@ static NSUInteger CGSyncFingerprint(NSDictionary *root, BOOL *busyOut) {
     return encoded ? encoded.hash : 0;
 }
 
+// Read only visible assistant text from the newest server page.
+// The modern endpoint may not expose partial text until generation completes.
+static NSString *CGSyncLatestAssistantText(NSDictionary *root) {
+    NSArray *messages=CGConversationPagingMessages(root);
+    for (id raw in [messages reverseObjectEnumerator]) {
+        if (![raw isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary *entry=raw;
+        NSDictionary *msg=[entry[@"message"] isKindOfClass:NSDictionary.class]
+            ?entry[@"message"]:entry;
+        NSDictionary *author=[msg[@"author"] isKindOfClass:NSDictionary.class]
+            ?msg[@"author"]:nil;
+        NSString *role=[author[@"role"] isKindOfClass:NSString.class]
+            ?author[@"role"]:nil;
+        if ([role isEqualToString:@"user"]) return nil;
+        if (![role isEqualToString:@"assistant"]) continue;
+        NSDictionary *content=[msg[@"content"] isKindOfClass:NSDictionary.class]
+            ?msg[@"content"]:nil;
+        NSMutableArray<NSString *> *fragments=[NSMutableArray array];
+        id parts=content[@"parts"];
+        if ([parts isKindOfClass:NSArray.class]) {
+            for (id part in parts) {
+                if ([part isKindOfClass:NSString.class]) [fragments addObject:part];
+                else if ([part isKindOfClass:NSDictionary.class]) {
+                    id text=((NSDictionary *)part)[@"text"];
+                    if ([text isKindOfClass:NSString.class]) [fragments addObject:text];
+                }
+            }
+        }
+        if (!fragments.count) {
+            id text=content[@"text"];
+            if ([text isKindOfClass:NSString.class]) [fragments addObject:text];
+        }
+        return fragments.count?[fragments componentsJoinedByString:@"\n"]:nil;
+    }
+    return nil;
+}
+
 static BOOL CGSyncVisible(void) {
     UIApplication *app=UIApplication.sharedApplication;
     return app.applicationState==UIApplicationStateActive;
@@ -332,6 +373,8 @@ static void CGSyncPoll(NSUInteger generation) {
             ?CGConversationPagingJSONObject(data):nil;
         BOOL busy=NO;
         NSUInteger hash=root?CGSyncFingerprint(root,&busy):0;
+        NSString *replyText=root?CGSyncLatestAssistantText(root):nil;
+        BOOL previewChanged=NO;
         BOOL changed=NO, firstObserved=NO, shouldRetry=NO;
         @synchronized(CGSyncLock()) {
             if (generation!=sSyncGeneration) return;
@@ -345,11 +388,25 @@ static void CGSyncPoll(NSUInteger generation) {
                 sSyncLastObservedSignature=hash;
                 sSyncHasObservedSignature=YES;
                 sSyncBusy=busy;
+                NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+                if (stale && replyText.length) {
+                    NSUInteger nextHash=replyText.hash;
+                    previewChanged=sSyncPreviewHash!=nextHash;
+                    if (previewChanged) {
+                        sSyncPreviewHash=nextHash;
+                        sSyncLastTextChange=now;
+                        sSyncLastPreviewLength=replyText.length;
+                    }
+                }
                 if (stale) {
-                    NSTimeInterval now=NSDate.date.timeIntervalSince1970;
-                    // Retrying without a delivered response is essential if a
-                    // native selection dispatch was ignored.
-                    if (now-sSyncLastUIRefresh>=20) {
+                    // Do not destroy the active screen during a progressing reply.
+                    // Reopen once it has settled, only if the native UI remains stale.
+                    BOOL settled=!busy && (!replyText.length ||
+                        now-sSyncLastTextChange>=35);
+                    BOOL readyToRetry=!sSyncAwaitingReload ||
+                        now-sSyncLastUIRefresh>=95;
+                    if (settled && readyToRetry &&
+                        now-sSyncLastUIRefresh>=30) {
                         changed=YES;
                         sSyncLastUIRefresh=now;
                         sSyncAwaitingReload=YES;
@@ -361,6 +418,15 @@ static void CGSyncPoll(NSUInteger generation) {
             shouldRetry=YES;
         }
         CGSyncLog(root?@"POLL_OK":@"POLL_FAILED",status,root?CGConversationPagingMessages(root).count:0);
+        if (root) CGSyncLog(replyText.length?@"SERVER_ASSISTANT_TEXT":@"NO_SERVER_ASSISTANT_TEXT",
+                            status,replyText.length);
+        if (previewChanged) {
+            NSString *cid=nil;
+            @synchronized(CGSyncLock()) {
+                if (generation==sSyncGeneration) cid=[sSyncID copy];
+            }
+            if (cid.length) CGSyncPreviewUpdate(cid,replyText);
+        }
         if (changed) {
             CGSyncLog(firstObserved?@"REMOTE_MESSAGE_CHANGED":@"STALE_RENDER_RETRY",
                       status,busy?1:0);
@@ -408,6 +474,10 @@ void CGChatSyncTrackDetail(NSURLRequest *request, NSURLSessionConfiguration *con
         sSyncHasSignature=NO;
         sSyncHasObservedSignature=NO;
         sSyncAwaitingReload=NO;
+        sSyncPreviewHash=0;
+        sSyncLastTextChange=0;
+        sSyncLastPreviewLength=0;
+        CGSyncPreviewHide();
         sSyncDelivered=NO;
         sSyncBusy=NO;
         sSyncLastUIRefresh=0;
@@ -436,6 +506,7 @@ void CGChatSyncMarkDelivered(NSURLRequest *request, NSDictionary *root) {
         if (firstDelivery) token=sSyncGeneration;
     }
     CGSyncLog(@"CONVERSATION_DELIVERED",0,busy?1:0);
+    CGSyncPreviewHide();
     if (token) CGSyncSchedule(token,5);
 }
 

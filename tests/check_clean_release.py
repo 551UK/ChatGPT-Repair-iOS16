@@ -96,4 +96,16 @@ assert "sSyncSignature=signature" in sync
 assert "CGFloat centredX=(CGRectGetWidth(window.bounds)-pillWidth)*0.5;" in sync
 assert "CGRectMake(centredX,safe+56,pillWidth,30)" in sync
 assert "window.bounds.size.width-140" not in sync
+# Remote reply preview must not navigate during changing server text.
+assert "CGSyncLatestAssistantText" in sync
+assert "CGSyncPreviewUpdate" in sync
+assert "SERVER_ASSISTANT_TEXT" in sync
+assert "NO_SERVER_ASSISTANT_TEXT" in sync
+assert "now-sSyncLastTextChange>=35" in sync
+assert "now-sSyncLastUIRefresh>=95" in sync
+assert "src/ConversationLivePreview.m" in (root/"Makefile").read_text()
+preview=(root/"src/ConversationLivePreview.m").read_text()
+assert "Live reply preview" in preview
+assert "CGSyncPreviewUpdate" in preview and "gText.text=display" in preview
+assert "CGSyncPreviewHide" in preview
 print("PASS: clean source-only tree and existing repair regression guards")
