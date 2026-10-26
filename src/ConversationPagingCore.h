@@ -11,7 +11,7 @@ NSData * _Nullable CGConversationPagingLegacyData(NSDictionary *root,
                                                     NSArray *messages,
                                                     NSString * _Nullable currentNodeOverride);
 
-NS_ASSUME_NONNULL_END
-
 // Replace the cached suffix at a shared anchor. nil means a full reload is needed.
-NSArray *CGConversationPagingReplaceTail(NSArray *cached, NSArray *newest);
+NSArray * _Nullable CGConversationPagingReplaceTail(NSArray *cached, NSArray *newest);
+
+NS_ASSUME_NONNULL_END
