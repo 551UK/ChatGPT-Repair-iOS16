@@ -2,7 +2,8 @@
 #import "ConversationPagingState.h"
 #include <math.h>
 
-static const NSUInteger kConversationPageSize=100;
+// Request smaller pages to avoid backend timeouts on very large conversations.
+static const NSUInteger kConversationPageSize=20;
 
 @interface NSURLSession (CGConversationPagingOriginal)
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request
