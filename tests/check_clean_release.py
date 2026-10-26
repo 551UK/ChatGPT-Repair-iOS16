@@ -87,4 +87,18 @@ assert "CGPagingDisplayableMessage" in (root/"src/ConversationPagingCore.m").rea
 assert "CGConversationPagingVisibleCount" in (root/"src/ConversationPagingCore.h").read_text()
 assert "VISIBLE_CONVERSATION" in paging_network
 assert "kDiagnosticMaxRenderMessages" not in (root/"src/ConversationPagingCore.m").read_text()
-print("PASS: Native1 conversation paging unchanged; button-only manual refresh")
+
+# Fast initial handoff prevents blank chats while older 20-turn pages load.
+assert "FAST_FIRST_PAGE" in paging_network
+assert "BACKGROUND_HISTORY_STARTED" in paging_network
+assert "BACKGROUND_HISTORY_READY" in paging_network
+assert "BACKGROUND_HISTORY_ALREADY_LOADING" in paging_network
+assert "CGChatSyncHydrateBackgroundHistory(originalRequest)" in paging_network
+assert "CGConversationPagingVisibleCount(newest)==0" in paging_network
+first_page=paging_network.split("CGPagingTrace(@\"FAST_FIRST_PAGE\"",1)[1]
+assert first_page.index("CGPagingDeliverComplete(root,newest,current,originalRequest,response,completion)") < first_page.index("CGPagingFetchOlderPage(configuration,originalRequest,cid,generation")
+assert "sHistoryPrefetchGeneration==generation" in paging_network
+assert "sAutoHydratedGeneration!=sSelectionGeneration" in sync
+assert "BACKGROUND_HISTORY_REFRESH_STARTED" in sync
+assert "CGChatSyncHydrateBackgroundHistory" in (root/"src/ConversationLiveSync.h").read_text()
+print("PASS: Manual8 fast handoff and one-time native hydration with existing manual refresh")
