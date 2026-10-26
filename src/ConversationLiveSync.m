@@ -156,13 +156,22 @@ static void CGManualUpdateButton(void) {
         // User-supplied refresh-arrow icon, cropped to its transparent silhouette.
         NSData *asset=[[NSData alloc] initWithBase64EncodedString:@"iVBORw0KGgoAAAANSUhEUgAAABgAAAAZCAYAAAArK+5dAAABjklEQVR42rVWPUsDQRB9ZxQsxMYiVhZahiiBQGy0CClEkUA6G63sxMpGqyhim8ZGBAv1B1gIKS0ESyGVHymiRYIgiEEbBX02czA5du/D3A0sw968ebO7czuzDkkkKQNIWAZD4jIAcgAmZX4P4ArAqwWfBdAC8AmStjFC8oj+8kJyh+Sw8quIbZ8kbORlA1mD5CnJc5J3BnuB5KKa12wBthTojeQqyZRlISWSHcvujAHmFODQ5/i8ox4mwBDJHzFWI5BXwu7gQAw3EciLPj9AjWTPPdgWvR7hN1/wsbUAwHv2nQirDzXcHRREXyRVKsZEPyUV4CvG2lQCQADLmvBZ9EQMAdZEj+skT0mS2zEk9kO4pr33wDXk+iCfF45v95upBt32EeBBOHZNARySXQHs/YO8Kr5dXRy9oLy66psRyI+V34y2mcAbCnxGMu1DPEuyqfBlL8axNP0lAJdq3gBQF50CkAewAiCtMEVpo70S0DJPAlrmu+Rr1MbjhHy2ZFXT/wXwCOAaQDvI0Un6XfQHl3x0gBJvwFIAAAAASUVORK5CYII="
                                                           options:0];
-        UIImage *icon=[[UIImage imageWithData:asset]
-            imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+        UIImage *icon=[UIImage imageWithData:asset];
         if (!icon) icon=[UIImage systemImageNamed:@"arrow.clockwise"];
-        [button setImage:icon forState:UIControlStateNormal];
+        // Render the original refresh symbol at 20pt rather than its 24pt
+        // source size; this matches the adjacent New Chat icon better.
+        UIGraphicsBeginImageContextWithOptions(CGSizeMake(20,20),NO,0);
+        [icon drawInRect:CGRectMake(0,0,20,20)];
+        UIImage *smallIcon=UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+        [button setImage:[(smallIcon ?: icon)
+            imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate]
+                forState:UIControlStateNormal];
         button.tintColor=[UIColor colorWithWhite:0.94 alpha:1];
         button.imageView.contentMode=UIViewContentModeScaleAspectFit;
-        button.imageEdgeInsets=UIEdgeInsetsMake(9,9,9,9);
+        // Lower only the artwork by 2pt; keep the full 44pt tap target
+        // aligned to the native New Chat control.
+        button.imageEdgeInsets=UIEdgeInsetsMake(11,9,7,9);
         [button addTarget:[CGManualRefreshAction shared]
                   action:@selector(refresh:)
         forControlEvents:UIControlEventTouchUpInside];

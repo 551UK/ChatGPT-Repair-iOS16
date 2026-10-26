@@ -66,6 +66,11 @@ assert "CGManualButtonFrame" in sync and "CGManualNewChatControlIn" in sync
 assert "MANUAL_BUTTON_ALIGNED" in sync and "MANUAL_BUTTON_FALLBACK" in sync
 assert "view.accessibilityLabel" in sync and "new chat" in sync
 assert "CGRectGetMidY(r)-22" in sync
+assert "UIGraphicsBeginImageContextWithOptions(CGSizeMake(20,20),NO,0)" in sync
+assert "button.imageEdgeInsets=UIEdgeInsetsMake(11,9,7,9)" in sync
+assert "[button.widthAnchor" not in sync
+assert "CGManualSetWorking(YES)" in sync
+
 assert "[host addSubview:button]" in sync
 assert "[window addSubview:button]" not in sync
 assert "button.trailingAnchor" not in sync
