@@ -61,55 +61,26 @@ assert "CGConversationPagingHasVersionMarkers" not in (root/"src/ConversationPag
 sync=(root/"src/ConversationLiveSync.m").read_text()
 assert "CGChatSyncTrackDetail" in sync
 assert "CGChatSyncMarkDelivered" in sync
-assert "CGSyncRequestUIRefresh" in sync
 assert "UIApplicationDidBecomeActiveNotification" in sync
 assert "src/ConversationLiveSync.m" in (root/"Makefile").read_text()
-# Cross-device changes must remain detectable after the first eight polls.
-assert "sSyncPolls>=8" not in sync
-assert "sSyncPolls>=60" not in sync
-assert "shouldRetry=YES" in sync
 assert "NSJSONWritingSortedKeys" in sync
-assert "messages ?: @[]" in sync
-assert "CGSyncIndicator" in sync and "UIActivityIndicatorView" in sync
-assert "CGSyncReopenCurrentConversation" in sync
-assert "NATIVE_RESELECT" in sync
+assert "UIActivityIndicatorView" in sync
+assert 'CGFloat centerX=(CGRectGetWidth(window.bounds)-width)*0.5;' in sync
+assert "REMOTE_CHANGE_DETECTED" in sync
+assert "IN_PLACE_REFRESH_UNAVAILABLE" in sync
+assert "CGSyncRefreshInPlace" in sync
 assert "kDiagnosticMaxRenderMessages" not in paging_network
-# The missing UI refresh was due to losing the sidebar controller when chat opens.
+# Safety guards: never open or reselect chats, and never show a text preview.
+assert "CG46OpenPin" not in sync
+assert "CGSyncReopenCurrentConversation" not in sync
+assert "RESELECT_NATIVE_DISPATCHED" not in sync
+assert "NATIVE_RESELECT" not in sync
+assert "CGSyncPreviewUpdate" not in sync
+assert "CGSyncPreviewHide" not in sync
+assert "Live reply preview" not in sync
+assert "ConversationLivePreview" not in (root/"Makefile").read_text()
 pins=(root/"src/PinnedSidebarIntegration.m").read_text()
-assert "CGChatSyncRememberHistoryController((UIViewController *)self)" in pins
-assert "CGChatSyncRememberHistoryController" in sync
-assert "RESELECT_NATIVE_DISPATCHED" in sync
-assert "RESELECT_NO_HISTORY_CONTROLLER" in sync
-assert "sSyncRecentHistoryController" in sync
-assert "canInvoke=vc.isViewLoaded" in sync
-# Sync4 preserves the history controller after the sidebar disappears and
-# retries remote changes until a new conversation detail response is delivered.
-assert "static UIViewController *sSyncRecentHistoryController;" in sync
-assert "static __weak UIViewController *sSyncRecentHistoryController;" not in sync
-assert "STALE_RENDER_RETRY" in sync
-assert "RESELECT_RETAINED_ATTEMPT" in sync
-assert "RELOAD_DETAIL_REQUEST_RECEIVED" in sync
-assert "CONVERSATION_DELIVERED" in sync
-assert "sSyncSignature=hash" not in sync
-assert "sSyncSignature=signature" in sync
-# Overlay is centred below the header, without altering sync request handling.
-assert "CGFloat centredX=(CGRectGetWidth(window.bounds)-pillWidth)*0.5;" in sync
-assert "CGRectMake(centredX,safe+56,pillWidth,30)" in sync
-assert "window.bounds.size.width-140" not in sync
-# Remote reply preview must not navigate during changing server text.
-assert "CGSyncLatestAssistantText" in sync
-assert "CGSyncPreviewUpdate" in sync
-assert "SERVER_ASSISTANT_TEXT" in sync
-assert "NO_SERVER_ASSISTANT_TEXT" in sync
-assert "now-sSyncLastTextChange>=35" in sync
-assert "now-sSyncLastUIRefresh>=95" in sync
-assert "src/ConversationLivePreview.m" in (root/"Makefile").read_text()
-preview=(root/"src/ConversationLivePreview.m").read_text()
-assert "Live reply preview" in preview
-assert "CGSyncPreviewUpdate" in preview and "gText.text=display" in preview
-assert "CGSyncPreviewHide" in preview
-# Surface actual ObjC selectors before choosing a private Swift refresh method.
-assert "CGSyncTraceRefreshMethods" in sync
-assert "NATIVE_METHOD_SCAN_COMPLETE" in sync
-assert "method_getNumberOfArguments" in sync
+assert "CGChatSyncRememberHistoryController" not in pins
+assert not (root/"src/ConversationLivePreview.m").exists()
+assert not (root/"src/ConversationLivePreview.h").exists()
 print("PASS: clean source-only tree and existing repair regression guards")
