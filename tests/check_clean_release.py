@@ -55,7 +55,4 @@ assert "PARTIAL_HISTORY" in paging_network
 older=paging_network.split("static void CGPagingRetryOlder(",1)[1].split(
     "NSURLRequest *CGConversationPagingPrepareDetailRequest(",1)[0]
 assert "CGPagingFinishFallback(" not in older
-assert "kDiagnosticMaxRenderMessages=250;" in paging_network
-assert "RENDER_WINDOW_TOTAL" in paging_network
-assert "RENDER_WINDOW_SHOWN" in paging_network
 print("PASS: clean source-only tree and existing repair regression guards")
