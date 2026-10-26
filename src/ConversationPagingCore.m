@@ -124,3 +124,30 @@ NSData *CGConversationPagingLegacyData(NSDictionary *root, NSArray *messages,
 
     return [NSJSONSerialization dataWithJSONObject:legacy options:0 error:NULL];
 }
+
+NSArray *CGConversationPagingReplaceTail(NSArray *cached, NSArray *newest) {
+    if (!cached.count || !newest.count) return nil;
+    NSString *anchor=CGPagingMessageID(newest.firstObject);
+    if (!anchor.length) return nil;
+    NSUInteger index=NSNotFound;
+    for (NSUInteger i=0;i<cached.count;i++) {
+        if ([CGPagingMessageID(cached[i]) isEqualToString:anchor]) { index=i; break; }
+    }
+    if (index==NSNotFound) return nil;
+    // Validate IDs before truncation. Never retain an obsolete regenerated suffix.
+    NSMutableSet *seen=[NSMutableSet set];
+    NSMutableArray *result=[NSMutableArray array];
+    for (NSUInteger i=0;i<index;i++) {
+        NSString *identifier=CGPagingMessageID(cached[i]);
+        if (!identifier.length || [seen containsObject:identifier]) return nil;
+        [seen addObject:identifier];
+        [result addObject:cached[i]];
+    }
+    for (id raw in newest) {
+        NSString *identifier=CGPagingMessageID(raw);
+        if (!identifier.length || [seen containsObject:identifier]) return nil;
+        [seen addObject:identifier];
+        [result addObject:raw];
+    }
+    return result;
+}

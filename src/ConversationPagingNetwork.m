@@ -4,6 +4,9 @@
 #import "ConversationPagingCore.h"
 #import "ConversationLiveSync.h"
 
+static NSString *sCachedConversationID;
+static NSArray *sCachedMessages;
+
 @interface NSURLSession (CGConversationPagingOriginal)
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request
     completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler;
@@ -71,6 +74,13 @@ static void CGPagingDeliverComplete(NSDictionary *newestRoot,
                                 code:2
                             userInfo:@{NSLocalizedDescriptionKey:@"Unable to convert complete conversation page set"}]);
         return;
+    }
+    @synchronized(CGPagingStateLock()) {
+        NSString *cid=CGPagingConversationID(originalRequest);
+        if ([CGPagingSelectedID isEqualToString:cid]) {
+            sCachedConversationID=[cid copy];
+            sCachedMessages=[allMessages copy];
+        }
     }
     CGChatSyncMarkDelivered(originalRequest,newestRoot);
     completion(legacy,
@@ -254,6 +264,8 @@ NSURLRequest *CGConversationPagingPrepareDetailRequest(NSURLRequest *originalReq
     @synchronized(CGPagingStateLock()) {
         if (![CGPagingSelectedID isEqualToString:cid]) {
             CGPagingSelectedID=[cid copy];
+            sCachedConversationID=nil;
+            sCachedMessages=nil;
             CGPagingGeneration++;
         }
         if (generationOut) *generationOut=CGPagingGeneration;
@@ -372,6 +384,16 @@ static void CGPagingProcessFirstResponse(
     CGPagingTrace(@"FIRST_PAGE_MESSAGES",status,newest.count,hasPrevious ? 1 : 0);
     if (!hasPrevious) {
         CGPagingDeliverComplete(root,newest,current,originalRequest,response,completion);
+        return;
+    }
+    NSArray *tailMerged=nil;
+    @synchronized(CGPagingStateLock()) {
+        if ([sCachedConversationID isEqualToString:cid])
+            tailMerged=CGConversationPagingReplaceTail(sCachedMessages,newest);
+    }
+    if (tailMerged) {
+        CGPagingTrace(@"LIVE_TAIL_MERGED",status,tailMerged.count,0);
+        CGPagingDeliverComplete(root,tailMerged,current,originalRequest,response,completion);
         return;
     }
     if (!cursor.length) {

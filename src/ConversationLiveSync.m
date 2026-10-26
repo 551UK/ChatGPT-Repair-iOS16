@@ -3,6 +3,7 @@
 #import "ConversationLiveSync.h"
 #import "ConversationPagingState.h"
 #import "ConversationPagingCore.h"
+#import "NativeConversationRefresh.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -96,7 +97,7 @@ static void CGSyncStatus(NSString *state, BOOL visible) {
         sIndicator.frame=CGRectMake(centerX,safe+56,width,30);
         sIndicatorLabel.text=state ?: @"Checking";
         sIndicator.hidden=NO;
-        if ([state isEqualToString:@"Checking"])
+        if ([state isEqualToString:@"Checking"] || [state isEqualToString:@"Updating"])
             [sSpinner startAnimating];
         else
             [sSpinner stopAnimating];
@@ -141,70 +142,23 @@ static NSUInteger CGSyncSnapshotHash(NSDictionary *root, BOOL *busy) {
     return data ? data.hash : 0;
 }
 
-// Only attempt a parameterless Objective-C refresh on a visible chat.
-// Never invoke an unknown Swift ABI method or any navigation/reselection.
-static BOOL CGSyncTryRefreshObject(id object) {
-    if (!object) return NO;
-    for (NSString *name in @[@"refreshConversation",@"reloadConversation"]) {
-        SEL selector=NSSelectorFromString(name);
-        if (![object respondsToSelector:selector]) continue;
-        Method method=class_getInstanceMethod([object class],selector);
-        if (!method || method_getNumberOfArguments(method)!=2) continue;
-        char type[8]={0};
-        method_getReturnType(method,type,sizeof(type));
-        if (type[0]!='v') continue;
-        @try {
-            ((void(*)(id,SEL))objc_msgSend)(object,selector);
-            CGSyncLog(@"IN_PLACE_REFRESH_DISPATCHED",0,0);
-            return YES;
-        } @catch (__unused NSException *exception) {
-            CGSyncLog(@"IN_PLACE_REFRESH_EXCEPTION",0,0);
-        }
-    }
-    return NO;
-}
-
-static BOOL CGSyncTryVisibleController(UIViewController *vc, NSMutableSet *seen) {
-    if (!vc || [seen containsObject:vc]) return NO;
-    [seen addObject:vc];
-    BOOL visible=vc.isViewLoaded && vc.view.window!=nil;
-    NSString *kind=NSStringFromClass(vc.class);
-    BOOL candidate=([kind localizedCaseInsensitiveContainsString:@"Conversation"] ||
-        [kind localizedCaseInsensitiveContainsString:@"Chat"] ||
-        [kind localizedCaseInsensitiveContainsString:@"Message"]) &&
-        ![kind localizedCaseInsensitiveContainsString:@"History"];
-    if (visible && candidate) {
-        if (CGSyncTryRefreshObject(vc)) return YES;
-        for (NSString *key in @[@"viewModel",@"conversationViewModel"]) {
-            @try {
-                id model=[vc valueForKey:key];
-                if (CGSyncTryRefreshObject(model)) return YES;
-            } @catch (__unused NSException *exception) {}
-        }
-    }
-    for (UIViewController *child in vc.childViewControllers)
-        if (CGSyncTryVisibleController(child,seen)) return YES;
-    if (vc.presentedViewController &&
-        CGSyncTryVisibleController(vc.presentedViewController,seen))
-        return YES;
-    return NO;
-}
-
 static void CGSyncRefreshInPlace(NSUInteger generation) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!CGSyncForeground()) return;
+        NSString *cid;
         @synchronized(CGSyncLock()) {
             if (generation!=sGeneration) return;
+            cid=[sConversationID copy];
         }
-        BOOL invoked=NO;
-        NSMutableSet *seen=[NSMutableSet set];
-        for (UIWindow *window in UIApplication.sharedApplication.windows) {
-            if (CGSyncTryVisibleController(window.rootViewController,seen)) {
-                invoked=YES;
-                break;
+        BOOL started=CGNativeRefreshConversation(cid,^(BOOL success) {
+            @synchronized(CGSyncLock()) {
+                if (generation!=sGeneration) return;
             }
-        }
-        if (!invoked) CGSyncLog(@"IN_PLACE_REFRESH_UNAVAILABLE",0,0);
+            CGSyncLog(success?@"NATIVE_REFRESH_COMPLETED":@"NATIVE_REFRESH_FAILED",0,0);
+            CGSyncStatus(@"Updating",NO);
+        });
+        CGSyncLog(started?@"NATIVE_REFRESH_STARTED":@"IN_PLACE_REFRESH_UNAVAILABLE",0,0);
+        if (started) CGSyncStatus(@"Updating",YES);
     });
 }
 
@@ -253,7 +207,7 @@ static void CGSyncPoll(NSUInteger generation) {
                     sDeliveredHash!=hash;
                 if (changed) {
                     NSTimeInterval now=NSDate.date.timeIntervalSince1970;
-                    if (now-sLastRefreshAttempt>30) {
+                    if (now-sLastRefreshAttempt>4) {
                         tryRefresh=YES;
                         sLastRefreshAttempt=now;
                     }
@@ -265,16 +219,16 @@ static void CGSyncPoll(NSUInteger generation) {
         if (changed) {
             // This detects server changes; it does not claim the screen updated.
             CGSyncLog(@"REMOTE_CHANGE_DETECTED",status,busy?1:0);
-            CGSyncStatus(@"New replies",YES);
+            CGSyncStatus(@"Updating",YES);
             if (tryRefresh) CGSyncRefreshInPlace(generation);
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),
                            dispatch_get_main_queue(), ^{
-                CGSyncStatus(@"New replies",NO);
+                CGSyncStatus(@"Updating",NO);
             });
         } else {
             CGSyncStatus(@"Checking",busy);
         }
-        CGSyncSchedule(generation,busy?8:15);
+        CGSyncSchedule(generation,busy?3:8);
     }];
     if (task) [task resume];
     else {
