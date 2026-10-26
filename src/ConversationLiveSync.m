@@ -57,6 +57,8 @@ static void CGSyncLog(NSString *event, NSInteger status, NSUInteger count) {
     } @catch (__unused NSException *exception) {}
 }
 
+void CGChatSyncLogEvent(NSString *event) { CGSyncLog(event,0,0); }
+
 static BOOL CGSyncForeground(void) {
     return UIApplication.sharedApplication.applicationState==UIApplicationStateActive;
 }

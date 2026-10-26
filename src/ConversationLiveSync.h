@@ -3,3 +3,4 @@
 #import <Foundation/Foundation.h>
 void CGChatSyncTrackDetail(NSURLRequest *request, NSURLSessionConfiguration *configuration);
 void CGChatSyncMarkDelivered(NSURLRequest *request, NSDictionary *root);
+void CGChatSyncLogEvent(NSString *event);
