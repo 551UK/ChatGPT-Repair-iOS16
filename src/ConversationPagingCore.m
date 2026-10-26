@@ -24,6 +24,46 @@ static NSString *CGPagingMessageID(id raw) {
         ? identifier : nil;
 }
 
+// The modern API includes records intended for the model and tools, not for
+// a human conversation. Never pass these into the 2024 SwiftUI timeline.
+// Preserve EVERY displayable user/assistant message; no fixed message cap.
+static BOOL CGPagingDisplayableMessage(id raw) {
+    NSDictionary *msg=CGPagingMessageObject(raw);
+    if (!msg) return NO;
+    NSDictionary *author=[msg[@"author"] isKindOfClass:NSDictionary.class]
+        ?msg[@"author"]:nil;
+    NSString *role=[author[@"role"] isKindOfClass:NSString.class]
+        ?author[@"role"]:nil;
+    if (!role.length) return YES; // Unknown schema: do not silently lose data.
+    if ([role isEqualToString:@"user"]) return YES;
+    if (![role isEqualToString:@"assistant"]) return NO;
+    NSString *recipient=[msg[@"recipient"] isKindOfClass:NSString.class]
+        ?msg[@"recipient"]:nil;
+    if (recipient.length && ![recipient isEqualToString:@"all"]) return NO;
+    NSDictionary *metadata=[msg[@"metadata"] isKindOfClass:NSDictionary.class]
+        ?msg[@"metadata"]:nil;
+    if ([metadata[@"is_visually_hidden_from_conversation"]
+            respondsToSelector:@selector(boolValue)] &&
+        [metadata[@"is_visually_hidden_from_conversation"] boolValue])
+        return NO;
+    NSString *channel=[metadata[@"channel"] isKindOfClass:NSString.class]
+        ?metadata[@"channel"]:nil;
+    if (!channel.length && [msg[@"channel"] isKindOfClass:NSString.class])
+        channel=msg[@"channel"];
+    if ([@[@"analysis",@"justify",@"confidence",@"delegate_summary",
+           @"juicepred",@"notification"] containsObject:channel ?: @""])
+        return NO;
+    return YES;
+}
+
+NSUInteger CGConversationPagingVisibleCount(NSArray *messages) {
+    NSUInteger count=0;
+    for (id raw in messages)
+        if (CGPagingMessageID(raw).length && CGPagingDisplayableMessage(raw))
+            count++;
+    return count;
+}
+
 NSDictionary *CGConversationPagingJSONObject(NSData *data) {
     if (!data.length || data.length>32*1024*1024) return nil;
     id json=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
@@ -76,7 +116,8 @@ NSData *CGConversationPagingLegacyData(NSDictionary *root, NSArray *messages,
     for (id raw in messages) {
         NSDictionary *message=CGPagingMessageObject(raw);
         NSString *identifier=CGPagingMessageID(raw);
-        if (!message || !identifier.length || [seen containsObject:identifier]) continue;
+        if (!message || !identifier.length || [seen containsObject:identifier] ||
+            !CGPagingDisplayableMessage(raw)) continue;
         [seen addObject:identifier];
         [valid addObject:message];
         [ids addObject:identifier];

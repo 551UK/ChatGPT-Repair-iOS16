@@ -48,6 +48,45 @@ int main(void) {
         NSCAssert([mapping[@"m3"][@"children"][0] isEqualToString:@"m4"],@"message chain broken at m3");
         NSCAssert(!legacy[@"messages"] && !legacy[@"page_info"],@"modern paging fields leaked to legacy decoder");
 
+        NSDictionary *visibleUser=@{@"id":@"visible-user",
+            @"author":@{@"role":@"user"},
+            @"content":@{@"content_type":@"text",@"parts":@[@"hello"]}};
+        NSDictionary *tool=@{@"id":@"tool",
+            @"author":@{@"role":@"tool"},
+            @"content":@{@"content_type":@"text",@"parts":@[@"internal"]}};
+        NSDictionary *toolCall=@{@"id":@"call",
+            @"author":@{@"role":@"assistant"},@"recipient":@"functions.exec",
+            @"content":@{@"content_type":@"text",@"parts":@[@"internal"]}};
+        NSDictionary *thinking=@{@"id":@"thinking",
+            @"author":@{@"role":@"assistant"},
+            @"metadata":@{@"channel":@"analysis"},
+            @"content":@{@"content_type":@"text",@"parts":@[@"internal"]}};
+        NSDictionary *hidden=@{@"id":@"hidden",
+            @"author":@{@"role":@"assistant"},
+            @"metadata":@{@"is_visually_hidden_from_conversation":@YES},
+            @"content":@{@"content_type":@"text",@"parts":@[@"internal"]}};
+        NSDictionary *visibleAnswer=@{@"id":@"visible-answer",
+            @"author":@{@"role":@"assistant"},
+            @"metadata":@{@"channel":@"final"},
+            @"content":@{@"content_type":@"text",@"parts":@[@"reply"]}};
+        NSArray *mixed=@[visibleUser,tool,toolCall,thinking,hidden,visibleAnswer];
+        NSCAssert(CGConversationPagingVisibleCount(mixed)==2,
+                  @"Only human-visible messages belong in the old renderer");
+        NSData *reduced=CGConversationPagingLegacyData(latest,mixed,@"visible-answer");
+        NSDictionary *mapped=CGConversationPagingJSONObject(reduced)[@"mapping"];
+        NSCAssert(mapped.count==3 && mapped[@"visible-user"] &&
+                  mapped[@"visible-answer"],@"Both visible messages remain");
+        NSCAssert([mapped[@"visible-user"][@"children"][0]
+                   isEqualToString:@"visible-answer"],
+                  @"Invisible tool records must not break message chain");
+        NSMutableArray *many=[NSMutableArray array];
+        for (NSUInteger i=0;i<600;i++)
+            [many addObject:Message([NSString stringWithFormat:@"visible-%lu",
+                       (unsigned long)i],@"content")];
+        NSData *all=CGConversationPagingLegacyData(latest,many,nil);
+        NSDictionary *full=CGConversationPagingJSONObject(all)[@"mapping"];
+        NSCAssert(CGConversationPagingVisibleCount(many)==600 &&
+                  full.count==601,@"No truncation of a long visible history");
         NSLog(@"PASS: conversation pages merge and convert to the 2024 mapping shape");
     }
     return 0;

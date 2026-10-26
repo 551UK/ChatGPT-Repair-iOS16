@@ -83,4 +83,8 @@ assert "LARGE_CHAT_HANDOFF" not in paging_network
 assert "LEGACY_CALLBACK_RETURNED" not in paging_network
 assert "kDiagnosticMaxRenderMessages" not in paging_network
 assert "src/ConversationLivePreview.m" not in (root/"Makefile").read_text()
+assert "CGPagingDisplayableMessage" in (root/"src/ConversationPagingCore.m").read_text()
+assert "CGConversationPagingVisibleCount" in (root/"src/ConversationPagingCore.h").read_text()
+assert "VISIBLE_CONVERSATION" in paging_network
+assert "kDiagnosticMaxRenderMessages" not in (root/"src/ConversationPagingCore.m").read_text()
 print("PASS: Native1 conversation paging unchanged; button-only manual refresh")

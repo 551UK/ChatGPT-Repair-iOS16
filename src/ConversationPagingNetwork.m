@@ -67,6 +67,7 @@ static void CGPagingDeliverComplete(NSDictionary *newestRoot,
                                     NSURLResponse *responseTemplate,
                                     void (^completion)(NSData *,NSURLResponse *,NSError *)) {
     CGPagingTrace(@"DELIVER_CONVERSATION",200,allMessages.count,0);
+    CGPagingTrace(@"VISIBLE_CONVERSATION",200,CGConversationPagingVisibleCount(allMessages),0);
     NSData *legacy=CGConversationPagingLegacyData(newestRoot,allMessages,currentNode);
     if (!legacy.length) {
         completion(nil,responseTemplate,
