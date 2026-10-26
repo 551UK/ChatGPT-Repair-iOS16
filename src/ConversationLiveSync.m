@@ -23,6 +23,8 @@ static NSString *sConversationID;
 static NSURLRequest *sConversationRequest;
 static NSURLSessionConfiguration *sConfiguration;
 static NSUInteger sGeneration;
+static NSUInteger sScheduleSerial;
+static NSUInteger sFailures;
 static BOOL sPollActive;
 static BOOL sDelivered;
 static BOOL sHasDeliveredHash;
@@ -166,8 +168,16 @@ static void CGSyncRefreshInPlace(NSUInteger generation) {
 
 static void CGSyncPoll(NSUInteger generation);
 static void CGSyncSchedule(NSUInteger generation, NSTimeInterval seconds) {
+    NSUInteger serial;
+    @synchronized(CGSyncLock()) {
+        if (generation!=sGeneration) return;
+        serial=++sScheduleSerial;
+    }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(seconds*NSEC_PER_SEC)),
                    dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
+        @synchronized(CGSyncLock()) {
+            if (generation!=sGeneration || serial!=sScheduleSerial) return;
+        }
         CGSyncPoll(generation);
     });
 }
@@ -200,10 +210,13 @@ static void CGSyncPoll(NSUInteger generation) {
         BOOL busy=NO;
         NSUInteger hash=root?CGSyncSnapshotHash(root,&busy):0;
         BOOL changed=NO,tryRefresh=NO;
+        NSTimeInterval nextDelay=8;
         @synchronized(CGSyncLock()) {
             if (generation!=sGeneration) return;
             sPollActive=NO;
             if (root) {
+                sFailures=0;
+                nextDelay=busy?3:8;
                 sBusy=busy;
                 changed=sDelivered && sHasDeliveredHash &&
                     sDeliveredHash!=hash;
@@ -214,6 +227,9 @@ static void CGSyncPoll(NSUInteger generation) {
                         sLastRefreshAttempt=now;
                     }
                 }
+            } else {
+                sFailures=MIN(sFailures+1,5);
+                nextDelay=MAX(MIN(8*(1UL<<sFailures),120),CGPagingRetryAfter(response));
             }
         }
         CGSyncLog(root?@"POLL_OK":@"POLL_FAILED",status,
@@ -230,7 +246,7 @@ static void CGSyncPoll(NSUInteger generation) {
         } else {
             CGSyncStatus(@"Checking",busy);
         }
-        CGSyncSchedule(generation,busy?3:8);
+        CGSyncSchedule(generation,nextDelay);
     }];
     if (task) [task resume];
     else {
@@ -247,11 +263,12 @@ void CGChatSyncTrackDetail(NSURLRequest *request, NSURLSessionConfiguration *con
     NSString *cid=CGPagingConversationID(request);
     if (!cid.length || !request) return;
     @synchronized(CGSyncLock()) {
-        if ([sConversationID isEqualToString:cid] && sConversationRequest)
-            return;
-        sConversationID=[cid copy];
+        BOOL same=[sConversationID isEqualToString:cid] && sConversationRequest;
         sConversationRequest=[request copy];
         sConfiguration=[config copy];
+        if (same) return;
+        sConversationID=[cid copy];
+        sFailures=0;
         sGeneration++;
         sPollActive=NO;
         sDelivered=NO;
