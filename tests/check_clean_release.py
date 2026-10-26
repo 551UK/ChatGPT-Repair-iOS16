@@ -78,7 +78,7 @@ assert "kDiagnosticMaxRenderMessages" not in paging_network
 pins=(root/"src/PinnedSidebarIntegration.m").read_text()
 assert "CGChatSyncRememberHistoryController((UIViewController *)self)" in pins
 assert "CGChatSyncRememberHistoryController" in sync
-assert "RESELECT_CACHED_SUCCESS" in sync
+assert "RESELECT_NATIVE_DISPATCHED" in sync
 assert "RESELECT_NO_HISTORY_CONTROLLER" in sync
 assert "sSyncRecentHistoryController" in sync
 assert "canInvoke=vc.isViewLoaded" in sync
