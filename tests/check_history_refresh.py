@@ -84,3 +84,17 @@ assert 'if (item.progressive) CGOriginCancelPending(item)' in merge
 assert 'CGOriginMergePageProgressive(historyConfig,request' in pins
 assert 'CGHistoryFirstPage(request) && !CGHasSelectedConversation()' in pins
 assert 'if (CGHasSelectedConversation()) return;' in pins
+
+
+# Manual refresh spinner stays independent of the header button and is centered
+# on the existing root chat view. No SwiftUI/accessibility scanning is added.
+live=(root/"src/ConversationLiveSync.m").read_text()
+assert 'static CGRect CGManualSpinnerFrame(UIView *host)' in live
+assert 'floor((CGRectGetWidth(bounds)-side)/2.0)' in live
+assert 'floor((CGRectGetHeight(bounds)-side)/2.0)' in live
+assert '[host addSubview:spinner];' in live
+assert '[button addSubview:spinner];' not in live
+assert 'sRefreshSpinner.frame=CGManualSpinnerFrame(host);' in live
+assert 'UIViewAutoresizingFlexibleTopMargin' in live
+assert 'UIViewAutoresizingFlexibleBottomMargin' in live
+assert 'CGManualSetWorking(sRefreshInProgress);' in live

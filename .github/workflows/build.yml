@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, test/large-chat-paged-recovery]
     paths:
       - 'src/**'
       - 'Makefile'
@@ -52,6 +52,8 @@ jobs:
           "$RUNNER_TEMP/HistoryOriginMergeTests"
           clang -fobjc-arc -fblocks -framework Foundation             src/ConversationPagingCore.m tests/ConversationPagingCoreTests.m             -o "$RUNNER_TEMP/ConversationPagingCoreTests"
           "$RUNNER_TEMP/ConversationPagingCoreTests"
+          clang -fobjc-arc -fblocks -framework Foundation src/ConversationPagingCore.m tests/ConversationTailTests.m -o "$RUNNER_TEMP/ConversationTailTests"
+          "$RUNNER_TEMP/ConversationTailTests"
           clang -fobjc-arc -fblocks -framework Foundation             src/CitationCompat.m src/RichMarkupCompat.m tests/CitationCompatTests.m             -o "$RUNNER_TEMP/CitationCompatTests"
           "$RUNNER_TEMP/CitationCompatTests"
 
@@ -83,6 +85,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ChatGPTRepair-source-only-test
+          path: dist/ChatGPTRepair_iphoneos-arm64.deb
+
+      - name: Upload Manual6 branch installer
+        if: github.ref == 'refs/heads/test/large-chat-paged-recovery'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatGPTRepair-Manual6
           path: dist/ChatGPTRepair_iphoneos-arm64.deb
 
       - name: Publish clean release

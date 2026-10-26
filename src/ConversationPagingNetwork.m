@@ -2,11 +2,44 @@
 #import "ConversationPagingCompat.h"
 #import "ConversationPagingState.h"
 #import "ConversationPagingCore.h"
+#import "ConversationLiveSync.h"
+
+static NSString *sCachedConversationID;
+static NSArray *sCachedMessages;
+// Only one background history walk per selected chat; a new chat cancels the old generation.
+static NSString *sHistoryPrefetchID;
+static NSUInteger sHistoryPrefetchGeneration;
 
 @interface NSURLSession (CGConversationPagingOriginal)
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request
     completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler;
 @end
+
+// Diagnostic: log request outcomes only. No conversation text, identifiers or credentials.
+static void CGPagingTrace(NSString *event, NSInteger status, NSUInteger count, NSUInteger attempt) {
+    @try {
+        @synchronized([NSFileManager class]) {
+            NSString *path=[NSHomeDirectory() stringByAppendingPathComponent:
+                @"Documents/ChatGPTRepairLargeChat.log"];
+            NSFileManager *fm=[NSFileManager defaultManager];
+            NSDictionary *attrs=[fm attributesOfItemAtPath:path error:NULL];
+            if ([attrs[NSFileSize] unsignedLongLongValue]>262144)
+                [fm removeItemAtPath:path error:NULL];
+            if (![fm fileExistsAtPath:path])
+                [fm createFileAtPath:path contents:[NSData data] attributes:nil];
+            NSFileHandle *handle=[NSFileHandle fileHandleForWritingAtPath:path];
+            if (handle) {
+                [handle seekToEndOfFile];
+                NSString *line=[NSString stringWithFormat:
+                    @"%@ event=%@ status=%ld count=%lu attempt=%lu\n",
+                    [NSDate date],event,(long)status,(unsigned long)count,
+                    (unsigned long)attempt];
+                [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+                [handle closeFile];
+            }
+        }
+    } @catch (__unused NSException *exception) {}
+}
 
 static NSError *CGPagingCancelledError(void) {
     return [NSError errorWithDomain:NSURLErrorDomain
@@ -19,6 +52,7 @@ static void CGPagingFinishFallback(NSURLSessionConfiguration *configuration,
                                    NSString *cid,
                                    NSUInteger generation,
                                    void (^completion)(NSData *,NSURLResponse *,NSError *)) {
+    CGPagingTrace(@"LEGACY_FALLBACK",0,0,0);
     CGPagingFetchLegacy(configuration,originalRequest,cid,generation,completion);
 }
 
@@ -35,6 +69,8 @@ static void CGPagingDeliverComplete(NSDictionary *newestRoot,
                                     NSURLRequest *originalRequest,
                                     NSURLResponse *responseTemplate,
                                     void (^completion)(NSData *,NSURLResponse *,NSError *)) {
+    CGPagingTrace(@"DELIVER_CONVERSATION",200,allMessages.count,0);
+    CGPagingTrace(@"VISIBLE_CONVERSATION",200,CGConversationPagingVisibleCount(allMessages),0);
     NSData *legacy=CGConversationPagingLegacyData(newestRoot,allMessages,currentNode);
     if (!legacy.length) {
         completion(nil,responseTemplate,
@@ -43,6 +79,19 @@ static void CGPagingDeliverComplete(NSDictionary *newestRoot,
                             userInfo:@{NSLocalizedDescriptionKey:@"Unable to convert complete conversation page set"}]);
         return;
     }
+    @synchronized(CGPagingStateLock()) {
+        NSString *cid=CGPagingConversationID(originalRequest);
+        if ([CGPagingSelectedID isEqualToString:cid]) {
+            // Older-page recovery may finish after newer messages have arrived.
+            // Keep the latest cached suffix rather than overwriting new replies.
+            NSArray *merged=([sCachedConversationID isEqualToString:cid]
+                && sCachedMessages.count>0 && allMessages.count>sCachedMessages.count)
+                ?CGConversationPagingReplaceTail(allMessages,sCachedMessages):nil;
+            sCachedConversationID=[cid copy];
+            sCachedMessages=[(merged ?: allMessages) copy];
+        }
+    }
+    CGChatSyncMarkDelivered(originalRequest,newestRoot);
     completion(legacy,
                CGPagingLegacyResponse(responseTemplate,originalRequest.URL,legacy.length),
                nil);
@@ -74,8 +123,10 @@ static void CGPagingRetryOlder(NSURLSessionConfiguration *configuration,
                                NSUInteger retryAttempt,
                                NSURLResponse *failedResponse,
                                void (^completion)(NSData *,NSURLResponse *,NSError *)) {
-    if (retryAttempt>=7) {
-        CGPagingFinishFallback(configuration,originalRequest,cid,generation,completion);
+    if (retryAttempt>=3) {
+        CGPagingTrace(@"PARTIAL_HISTORY",0,newerMessages.count,retryAttempt);
+        CGPagingDeliverComplete(newestRoot,newerMessages,currentNode,
+                                originalRequest,responseTemplate,completion);
         return;
     }
     NSTimeInterval delay=CGPagingBackoff(retryAttempt,failedResponse);
@@ -108,7 +159,9 @@ static void CGPagingFetchOlderPage(NSURLSessionConfiguration *configuration,
         return;
     }
     if (!before.length || [seenCursors containsObject:before]) {
-        CGPagingFinishFallback(configuration,originalRequest,cid,generation,completion);
+        CGPagingTrace(@"PARTIAL_HISTORY",0,newerMessages.count,retryAttempt);
+        CGPagingDeliverComplete(newestRoot,newerMessages,currentNode,
+                                originalRequest,responseTemplate,completion);
         return;
     }
     [seenCursors addObject:before];
@@ -130,6 +183,7 @@ static void CGPagingFetchOlderPage(NSURLSessionConfiguration *configuration,
                 }
 
                 NSInteger status=CGPagingStatus(response);
+                CGPagingTrace(@"OLDER_PAGE",status,data.length,retryAttempt);
                 if (CGPagingTransientFailure(status,error)) {
                     [seenCursors removeObject:before];
                     CGPagingRetryOlder(configuration,originalRequest,cid,generation,
@@ -138,7 +192,9 @@ static void CGPagingFetchOlderPage(NSURLSessionConfiguration *configuration,
                     return;
                 }
                 if (error || status<200 || status>=300) {
-                    CGPagingFinishFallback(configuration,originalRequest,cid,generation,completion);
+                    CGPagingTrace(@"PARTIAL_HISTORY",0,newerMessages.count,retryAttempt);
+        CGPagingDeliverComplete(newestRoot,newerMessages,currentNode,
+                                originalRequest,responseTemplate,completion);
                     return;
                 }
 
@@ -146,7 +202,9 @@ static void CGPagingFetchOlderPage(NSURLSessionConfiguration *configuration,
                 BOOL hasPrevious=NO;
                 NSString *nextCursor=nil;
                 if (!page || ![page[@"page_info"] isKindOfClass:NSDictionary.class]) {
-                    CGPagingFinishFallback(configuration,originalRequest,cid,generation,completion);
+                    CGPagingTrace(@"PARTIAL_HISTORY",0,newerMessages.count,retryAttempt);
+        CGPagingDeliverComplete(newestRoot,newerMessages,currentNode,
+                                originalRequest,responseTemplate,completion);
                     return;
                 }
 
@@ -154,7 +212,9 @@ static void CGPagingFetchOlderPage(NSURLSessionConfiguration *configuration,
                 nextCursor=CGConversationPagingStartCursor(page,&hasPrevious);
                 if (!olderMessages.count) {
                     if (hasPrevious) {
-                        CGPagingFinishFallback(configuration,originalRequest,cid,generation,completion);
+                        CGPagingTrace(@"PARTIAL_HISTORY",0,newerMessages.count,retryAttempt);
+        CGPagingDeliverComplete(newestRoot,newerMessages,currentNode,
+                                originalRequest,responseTemplate,completion);
                     } else {
                         CGPagingDeliverComplete(newestRoot,newerMessages,currentNode,
                                                 originalRequest,responseTemplate,completion);
@@ -164,7 +224,9 @@ static void CGPagingFetchOlderPage(NSURLSessionConfiguration *configuration,
 
                 NSArray *merged=CGConversationPagingMergeMessages(olderMessages,newerMessages);
                 if (merged.count<=newerMessages.count) {
-                    CGPagingFinishFallback(configuration,originalRequest,cid,generation,completion);
+                    CGPagingTrace(@"PARTIAL_HISTORY",0,newerMessages.count,retryAttempt);
+        CGPagingDeliverComplete(newestRoot,newerMessages,currentNode,
+                                originalRequest,responseTemplate,completion);
                     return;
                 }
 
@@ -174,7 +236,9 @@ static void CGPagingFetchOlderPage(NSURLSessionConfiguration *configuration,
                     return;
                 }
                 if (!nextCursor.length || [seenCursors containsObject:nextCursor]) {
-                    CGPagingFinishFallback(configuration,originalRequest,cid,generation,completion);
+                    CGPagingTrace(@"PARTIAL_HISTORY",0,newerMessages.count,retryAttempt);
+        CGPagingDeliverComplete(newestRoot,newerMessages,currentNode,
+                                originalRequest,responseTemplate,completion);
                     return;
                 }
 
@@ -187,12 +251,16 @@ static void CGPagingFetchOlderPage(NSURLSessionConfiguration *configuration,
         } else {
             [session invalidateAndCancel];
             session=nil;
-            CGPagingFinishFallback(configuration,originalRequest,cid,generation,completion);
+            CGPagingTrace(@"PARTIAL_HISTORY",0,newerMessages.count,retryAttempt);
+        CGPagingDeliverComplete(newestRoot,newerMessages,currentNode,
+                                originalRequest,responseTemplate,completion);
         }
     } @catch (__unused NSException *exception) {
         [session invalidateAndCancel];
         session=nil;
-        CGPagingFinishFallback(configuration,originalRequest,cid,generation,completion);
+        CGPagingTrace(@"PARTIAL_HISTORY",0,newerMessages.count,retryAttempt);
+        CGPagingDeliverComplete(newestRoot,newerMessages,currentNode,
+                                originalRequest,responseTemplate,completion);
     }
 }
 
@@ -205,20 +273,26 @@ NSURLRequest *CGConversationPagingPrepareDetailRequest(NSURLRequest *originalReq
     @synchronized(CGPagingStateLock()) {
         if (![CGPagingSelectedID isEqualToString:cid]) {
             CGPagingSelectedID=[cid copy];
+            sCachedConversationID=nil;
+            sCachedMessages=nil;
+            sHistoryPrefetchID=nil;
+            sHistoryPrefetchGeneration=0;
             CGPagingGeneration++;
         }
         if (generationOut) *generationOut=CGPagingGeneration;
     }
+    CGChatSyncTrackDetail(originalRequest,[NSURLSessionConfiguration defaultSessionConfiguration]);
     return CGPagingModernRequest(originalRequest,nil);
 }
 
-void CGConversationPagingProcessDetailResponse(
+static void CGPagingProcessFirstResponse(
     NSURLSessionConfiguration *configuration,
     NSURLRequest *originalRequest,
     NSUInteger generation,
     NSData *data,
     NSURLResponse *response,
     NSError *error,
+    NSUInteger initialAttempt,
     void (^completion)(NSData *, NSURLResponse *, NSError *)) {
 
     NSString *cid=CGPagingConversationID(originalRequest);
@@ -232,6 +306,57 @@ void CGConversationPagingProcessDetailResponse(
     }
 
     NSInteger status=CGPagingStatus(response);
+    CGPagingTrace(@"FIRST_PAGE",status,data.length,initialAttempt);
+    if (CGPagingTransientFailure(status,error)) {
+        if (initialAttempt>=3) {
+            CGPagingTrace(@"FIRST_PAGE_RETRIES_EXHAUSTED",status,0,initialAttempt);
+            NSError *finalError=[NSError errorWithDomain:@"com.551uk.chatgptrepair.paging"
+                code:503 userInfo:@{NSLocalizedDescriptionKey:
+                    @"Paged conversation timed out after modern endpoint retries"}];
+            completion(nil,nil,finalError);
+            return;
+        }
+        NSTimeInterval delay=CGPagingBackoff(initialAttempt,response);
+        CGPagingTrace(@"FIRST_PAGE_RETRY_SCHEDULED",status,0,initialAttempt);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),
+                       dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
+            if (!CGPagingStillActive(cid,generation)) {
+                completion(nil,nil,CGPagingCancelledError());
+                return;
+            }
+            NSURLRequest *modern=CGPagingModernRequest(originalRequest,nil);
+            NSURLSessionConfiguration *config=[configuration copy]
+                ?: [NSURLSessionConfiguration defaultSessionConfiguration];
+            if (config.timeoutIntervalForRequest<30) config.timeoutIntervalForRequest=30;
+            __block NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
+            @try {
+                NSURLSessionDataTask *task=[session cgp_dataTaskWithRequest:modern
+                    completionHandler:^(NSData *nextData,NSURLResponse *nextResponse,NSError *nextError) {
+                        [session finishTasksAndInvalidate];
+                        session=nil;
+                        CGPagingProcessFirstResponse(configuration,originalRequest,generation,
+                            nextData,nextResponse,nextError,initialAttempt+1,completion);
+                    }];
+                if (task) [task resume];
+                else {
+                    [session invalidateAndCancel];
+                    session=nil;
+                    NSError *taskError=[NSError errorWithDomain:NSURLErrorDomain
+                        code:NSURLErrorCannotConnectToHost userInfo:nil];
+                    CGPagingProcessFirstResponse(configuration,originalRequest,generation,
+                        nil,nil,taskError,initialAttempt+1,completion);
+                }
+            } @catch (__unused NSException *exception) {
+                [session invalidateAndCancel];
+                session=nil;
+                NSError *taskError=[NSError errorWithDomain:NSURLErrorDomain
+                    code:NSURLErrorCannotConnectToHost userInfo:nil];
+                CGPagingProcessFirstResponse(configuration,originalRequest,generation,
+                    nil,nil,taskError,initialAttempt+1,completion);
+            }
+        });
+        return;
+    }
     if (error || status<200 || status>=300) {
         if (!error && CGPagingCompatibilityFailure(status)) {
             CGPagingFinishFallback(configuration,originalRequest,cid,generation,completion);
@@ -267,8 +392,19 @@ void CGConversationPagingProcessDetailResponse(
         if ([identifier isKindOfClass:NSString.class]) current=identifier;
     }
 
+    CGPagingTrace(@"FIRST_PAGE_MESSAGES",status,newest.count,hasPrevious ? 1 : 0);
     if (!hasPrevious) {
         CGPagingDeliverComplete(root,newest,current,originalRequest,response,completion);
+        return;
+    }
+    NSArray *tailMerged=nil;
+    @synchronized(CGPagingStateLock()) {
+        if ([sCachedConversationID isEqualToString:cid])
+            tailMerged=CGConversationPagingReplaceTail(sCachedMessages,newest);
+    }
+    if (tailMerged) {
+        CGPagingTrace(@"LIVE_TAIL_MERGED",status,tailMerged.count,0);
+        CGPagingDeliverComplete(root,tailMerged,current,originalRequest,response,completion);
         return;
     }
     if (!cursor.length) {
@@ -276,7 +412,65 @@ void CGConversationPagingProcessDetailResponse(
         return;
     }
 
+    // Do not hold the 2024 conversation decoder hostage to every historical page.
+    // Immediately display the newest genuine messages. Continue fetching the
+    // full history off-screen; the native coordinator can hydrate it once ready.
+    // If the newest page has only internal records, retain the original
+    // blocking path so we never hand the legacy decoder an empty mapping.
+    if (CGConversationPagingVisibleCount(newest)==0) {
+        NSMutableSet<NSString *> *seen=[NSMutableSet set];
+        CGPagingFetchOlderPage(configuration,originalRequest,cid,generation,
+                               root,current,newest,cursor,seen,response,0,completion);
+        return;
+    }
+    CGPagingTrace(@"FAST_FIRST_PAGE",status,CGConversationPagingVisibleCount(newest),0);
+    CGPagingDeliverComplete(root,newest,current,originalRequest,response,completion);
+
+    BOOL shouldPrefetch=NO;
+    @synchronized(CGPagingStateLock()) {
+        if (!([sHistoryPrefetchID isEqualToString:cid] &&
+              sHistoryPrefetchGeneration==generation)) {
+            sHistoryPrefetchID=[cid copy];
+            sHistoryPrefetchGeneration=generation;
+            shouldPrefetch=YES;
+        }
+    }
+    if (!shouldPrefetch) {
+        CGPagingTrace(@"BACKGROUND_HISTORY_ALREADY_LOADING",status,0,0);
+        return;
+    }
     NSMutableSet<NSString *> *seen=[NSMutableSet set];
+    CGPagingTrace(@"BACKGROUND_HISTORY_STARTED",status,newest.count,0);
     CGPagingFetchOlderPage(configuration,originalRequest,cid,generation,
-                           root,current,newest,cursor,seen,response,0,completion);
+                           root,current,newest,cursor,seen,response,0,
+        ^(NSData *historyData, NSURLResponse *historyResponse, NSError *historyError) {
+            (void)historyResponse;
+            @synchronized(CGPagingStateLock()) {
+                if ([sHistoryPrefetchID isEqualToString:cid] &&
+                    sHistoryPrefetchGeneration==generation) {
+                    sHistoryPrefetchID=nil;
+                    sHistoryPrefetchGeneration=0;
+                }
+            }
+            if (!CGPagingStillActive(cid,generation) ||
+                historyError || !historyData.length) {
+                CGPagingTrace(@"BACKGROUND_HISTORY_FAILED",0,0,0);
+                return;
+            }
+            CGPagingTrace(@"BACKGROUND_HISTORY_READY",200,historyData.length,0);
+            // One-time hydration only, not continuous live polling.
+            CGChatSyncHydrateBackgroundHistory(originalRequest);
+        });
+}
+
+void CGConversationPagingProcessDetailResponse(
+    NSURLSessionConfiguration *configuration,
+    NSURLRequest *originalRequest,
+    NSUInteger generation,
+    NSData *data,
+    NSURLResponse *response,
+    NSError *error,
+    void (^completion)(NSData *, NSURLResponse *, NSError *)) {
+    CGPagingProcessFirstResponse(configuration,originalRequest,generation,
+                                data,response,error,0,completion);
 }

@@ -24,6 +24,46 @@ static NSString *CGPagingMessageID(id raw) {
         ? identifier : nil;
 }
 
+// The modern API includes records intended for the model and tools, not for
+// a human conversation. Never pass these into the 2024 SwiftUI timeline.
+// Preserve EVERY displayable user/assistant message; no fixed message cap.
+static BOOL CGPagingDisplayableMessage(id raw) {
+    NSDictionary *msg=CGPagingMessageObject(raw);
+    if (!msg) return NO;
+    NSDictionary *author=[msg[@"author"] isKindOfClass:NSDictionary.class]
+        ?msg[@"author"]:nil;
+    NSString *role=[author[@"role"] isKindOfClass:NSString.class]
+        ?author[@"role"]:nil;
+    if (!role.length) return YES; // Unknown schema: do not silently lose data.
+    if ([role isEqualToString:@"user"]) return YES;
+    if (![role isEqualToString:@"assistant"]) return NO;
+    NSString *recipient=[msg[@"recipient"] isKindOfClass:NSString.class]
+        ?msg[@"recipient"]:nil;
+    if (recipient.length && ![recipient isEqualToString:@"all"]) return NO;
+    NSDictionary *metadata=[msg[@"metadata"] isKindOfClass:NSDictionary.class]
+        ?msg[@"metadata"]:nil;
+    if ([metadata[@"is_visually_hidden_from_conversation"]
+            respondsToSelector:@selector(boolValue)] &&
+        [metadata[@"is_visually_hidden_from_conversation"] boolValue])
+        return NO;
+    NSString *channel=[metadata[@"channel"] isKindOfClass:NSString.class]
+        ?metadata[@"channel"]:nil;
+    if (!channel.length && [msg[@"channel"] isKindOfClass:NSString.class])
+        channel=msg[@"channel"];
+    if ([@[@"analysis",@"justify",@"confidence",@"delegate_summary",
+           @"juicepred",@"notification"] containsObject:channel ?: @""])
+        return NO;
+    return YES;
+}
+
+NSUInteger CGConversationPagingVisibleCount(NSArray *messages) {
+    NSUInteger count=0;
+    for (id raw in messages)
+        if (CGPagingMessageID(raw).length && CGPagingDisplayableMessage(raw))
+            count++;
+    return count;
+}
+
 NSDictionary *CGConversationPagingJSONObject(NSData *data) {
     if (!data.length || data.length>32*1024*1024) return nil;
     id json=[NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
@@ -45,20 +85,6 @@ NSString *CGConversationPagingStartCursor(NSDictionary *root, BOOL *hasPrevious)
     id cursor=page[@"start_cursor"];
     return [cursor isKindOfClass:NSString.class] && [(NSString *)cursor length]
         ? cursor : nil;
-}
-
-BOOL CGConversationPagingHasVersionMarkers(NSDictionary *root) {
-    id rootMarker=root[@"has_versions"];
-    if ([rootMarker respondsToSelector:@selector(boolValue)] && [rootMarker boolValue]) return YES;
-    for (id raw in CGConversationPagingMessages(root)) {
-        NSDictionary *message=CGPagingMessageObject(raw);
-        id direct=message[@"has_versions"];
-        if ([direct respondsToSelector:@selector(boolValue)] && [direct boolValue]) return YES;
-        NSDictionary *metadata=[message[@"metadata"] isKindOfClass:NSDictionary.class]?message[@"metadata"]:nil;
-        id marker=metadata[@"has_versions"];
-        if ([marker respondsToSelector:@selector(boolValue)] && [marker boolValue]) return YES;
-    }
-    return NO;
 }
 
 NSArray *CGConversationPagingMergeMessages(NSArray *older, NSArray *newer) {
@@ -90,7 +116,8 @@ NSData *CGConversationPagingLegacyData(NSDictionary *root, NSArray *messages,
     for (id raw in messages) {
         NSDictionary *message=CGPagingMessageObject(raw);
         NSString *identifier=CGPagingMessageID(raw);
-        if (!message || !identifier.length || [seen containsObject:identifier]) continue;
+        if (!message || !identifier.length || [seen containsObject:identifier] ||
+            !CGPagingDisplayableMessage(raw)) continue;
         [seen addObject:identifier];
         [valid addObject:message];
         [ids addObject:identifier];
@@ -137,4 +164,31 @@ NSData *CGConversationPagingLegacyData(NSDictionary *root, NSArray *messages,
     if (current.length) legacy[@"current_node"]=current;
 
     return [NSJSONSerialization dataWithJSONObject:legacy options:0 error:NULL];
+}
+
+NSArray *CGConversationPagingReplaceTail(NSArray *cached, NSArray *newest) {
+    if (!cached.count || !newest.count) return nil;
+    NSString *anchor=CGPagingMessageID(newest.firstObject);
+    if (!anchor.length) return nil;
+    NSUInteger index=NSNotFound;
+    for (NSUInteger i=0;i<cached.count;i++) {
+        if ([CGPagingMessageID(cached[i]) isEqualToString:anchor]) { index=i; break; }
+    }
+    if (index==NSNotFound) return nil;
+    // Validate IDs before truncation. Never retain an obsolete regenerated suffix.
+    NSMutableSet *seen=[NSMutableSet set];
+    NSMutableArray *result=[NSMutableArray array];
+    for (NSUInteger i=0;i<index;i++) {
+        NSString *identifier=CGPagingMessageID(cached[i]);
+        if (!identifier.length || [seen containsObject:identifier]) return nil;
+        [seen addObject:identifier];
+        [result addObject:cached[i]];
+    }
+    for (id raw in newest) {
+        NSString *identifier=CGPagingMessageID(raw);
+        if (!identifier.length || [seen containsObject:identifier]) return nil;
+        [seen addObject:identifier];
+        [result addObject:raw];
+    }
+    return result;
 }

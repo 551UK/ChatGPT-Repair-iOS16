@@ -23,6 +23,10 @@ ChatGPTRepair_FILES = \
 	src/ConversationPagingCore.m \
 	src/ConversationPagingState.m \
 	src/ConversationPagingNetwork.m \
+	src/ConversationLiveSync.m \
+	src/NativeConversationRefresh.m \
+	src/NativeConversationRefresh.swift \
+	src/NativeConversationABI.S \
 	src/HistoryIsolation.m \
 	src/HistoryPageCache.m \
 	src/HistoryOriginMerge.m \
@@ -39,5 +43,7 @@ ChatGPTRepair_FILES = \
 ChatGPTRepair_CFLAGS = -fobjc-arc -fblocks -fvisibility=hidden -Wno-deprecated-declarations
 ChatGPTRepair_FRAMEWORKS = Foundation UIKit CoreGraphics AVFoundation
 ChatGPTRepair_LIBRARIES = substrate
+
+ChatGPTRepair_SWIFTFLAGS = -swift-version 5
 
 include $(THEOS_MAKE_PATH)/tweak.mk
