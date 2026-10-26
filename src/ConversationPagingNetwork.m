@@ -6,6 +6,9 @@
 
 static NSString *sCachedConversationID;
 static NSArray *sCachedMessages;
+// Only one background history walk per selected chat; a new chat cancels the old generation.
+static NSString *sHistoryPrefetchID;
+static NSUInteger sHistoryPrefetchGeneration;
 
 @interface NSURLSession (CGConversationPagingOriginal)
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request
@@ -79,8 +82,13 @@ static void CGPagingDeliverComplete(NSDictionary *newestRoot,
     @synchronized(CGPagingStateLock()) {
         NSString *cid=CGPagingConversationID(originalRequest);
         if ([CGPagingSelectedID isEqualToString:cid]) {
+            // Older-page recovery may finish after newer messages have arrived.
+            // Keep the latest cached suffix rather than overwriting new replies.
+            NSArray *merged=([sCachedConversationID isEqualToString:cid]
+                && sCachedMessages.count>0 && allMessages.count>sCachedMessages.count)
+                ?CGConversationPagingReplaceTail(allMessages,sCachedMessages):nil;
             sCachedConversationID=[cid copy];
-            sCachedMessages=[allMessages copy];
+            sCachedMessages=[(merged ?: allMessages) copy];
         }
     }
     CGChatSyncMarkDelivered(originalRequest,newestRoot);
@@ -267,6 +275,8 @@ NSURLRequest *CGConversationPagingPrepareDetailRequest(NSURLRequest *originalReq
             CGPagingSelectedID=[cid copy];
             sCachedConversationID=nil;
             sCachedMessages=nil;
+            sHistoryPrefetchID=nil;
+            sHistoryPrefetchGeneration=0;
             CGPagingGeneration++;
         }
         if (generationOut) *generationOut=CGPagingGeneration;
@@ -402,9 +412,55 @@ static void CGPagingProcessFirstResponse(
         return;
     }
 
+    // Do not hold the 2024 conversation decoder hostage to every historical page.
+    // Immediately display the newest genuine messages. Continue fetching the
+    // full history off-screen; the native coordinator can hydrate it once ready.
+    // If the newest page has only internal records, retain the original
+    // blocking path so we never hand the legacy decoder an empty mapping.
+    if (CGConversationPagingVisibleCount(newest)==0) {
+        NSMutableSet<NSString *> *seen=[NSMutableSet set];
+        CGPagingFetchOlderPage(configuration,originalRequest,cid,generation,
+                               root,current,newest,cursor,seen,response,0,completion);
+        return;
+    }
+    CGPagingTrace(@"FAST_FIRST_PAGE",status,CGConversationPagingVisibleCount(newest),0);
+    CGPagingDeliverComplete(root,newest,current,originalRequest,response,completion);
+
+    BOOL shouldPrefetch=NO;
+    @synchronized(CGPagingStateLock()) {
+        if (!([sHistoryPrefetchID isEqualToString:cid] &&
+              sHistoryPrefetchGeneration==generation)) {
+            sHistoryPrefetchID=[cid copy];
+            sHistoryPrefetchGeneration=generation;
+            shouldPrefetch=YES;
+        }
+    }
+    if (!shouldPrefetch) {
+        CGPagingTrace(@"BACKGROUND_HISTORY_ALREADY_LOADING",status,0,0);
+        return;
+    }
     NSMutableSet<NSString *> *seen=[NSMutableSet set];
+    CGPagingTrace(@"BACKGROUND_HISTORY_STARTED",status,newest.count,0);
     CGPagingFetchOlderPage(configuration,originalRequest,cid,generation,
-                           root,current,newest,cursor,seen,response,0,completion);
+                           root,current,newest,cursor,seen,response,0,
+        ^(NSData *historyData, NSURLResponse *historyResponse, NSError *historyError) {
+            (void)historyResponse;
+            @synchronized(CGPagingStateLock()) {
+                if ([sHistoryPrefetchID isEqualToString:cid] &&
+                    sHistoryPrefetchGeneration==generation) {
+                    sHistoryPrefetchID=nil;
+                    sHistoryPrefetchGeneration=0;
+                }
+            }
+            if (!CGPagingStillActive(cid,generation) ||
+                historyError || !historyData.length) {
+                CGPagingTrace(@"BACKGROUND_HISTORY_FAILED",0,0,0);
+                return;
+            }
+            CGPagingTrace(@"BACKGROUND_HISTORY_READY",200,historyData.length,0);
+            // One-time hydration only, not continuous live polling.
+            CGChatSyncHydrateBackgroundHistory(originalRequest);
+        });
 }
 
 void CGConversationPagingProcessDetailResponse(
