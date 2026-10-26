@@ -59,18 +59,19 @@ assert "CGPagingFinishFallback(" not in older
 assert "kDiagnosticMaxRenderMessages" not in paging_network
 assert "CGConversationPagingHasVersionMarkers" not in (root/"src/ConversationPagingCore.m").read_text()
 sync=(root/"src/ConversationLiveSync.m").read_text()
-assert "CGChatSyncTrackDetail" in sync and "CGChatSyncMarkDelivered" in sync
+paging_network=(root/"src/ConversationPagingNetwork.m").read_text()
+assert "CGChatSyncTrackDetail" in sync
+assert "CGChatSyncMarkDelivered" in sync
 assert "CGNativeRefreshConversation(identifier" in sync
 assert "MANUAL_REFRESH_TAPPED" in sync
-assert "CGManualButtonFrame" in sync and "CGManualNewChatControlIn" in sync
-assert "MANUAL_BUTTON_ALIGNED" in sync and "MANUAL_BUTTON_FALLBACK" in sync
-assert "view.accessibilityLabel" in sync and "new chat" in sync
-assert "CGRectGetMidY(r)-22" in sync
+assert "CGManualButtonFrame" in sync
+assert "CGRectGetWidth(window.bounds)-90,safe-2,44,44" in sync
+assert "CGManualNewChatControlIn" not in sync
+assert "view.accessibilityLabel" not in sync
+assert "view.accessibilityIdentifier" not in sync
+assert "5*NSEC_PER_SEC" in sync
 assert "UIGraphicsBeginImageContextWithOptions(CGSizeMake(20,20),NO,0)" in sync
 assert "button.imageEdgeInsets=UIEdgeInsetsMake(11,9,7,9)" in sync
-assert "[button.widthAnchor" not in sync
-assert "CGManualSetWorking(YES)" in sync
-
 assert "[host addSubview:button]" in sync
 assert "[window addSubview:button]" not in sync
 assert "button.trailingAnchor" not in sync
@@ -78,10 +79,8 @@ assert "UIApplicationDidBecomeActiveNotification" in sync
 for forbidden in ("CGSyncPoll", "CGSyncSchedule", "CGSyncReopenCurrentConversation",
                   "CGSyncPreviewUpdate", "CG46OpenPin", "NATIVE_RESELECT"):
     assert forbidden not in sync, forbidden
-paging_network=(root/"src/ConversationPagingNetwork.m").read_text()
-assert "LARGE_CHAT_HANDOFF" in paging_network
-assert "LEGACY_CALLBACK_RETURNED" in paging_network
-assert "LEGACY_SERIALIZATION_FAILED" in paging_network
+assert "LARGE_CHAT_HANDOFF" not in paging_network
+assert "LEGACY_CALLBACK_RETURNED" not in paging_network
 assert "kDiagnosticMaxRenderMessages" not in paging_network
 assert "src/ConversationLivePreview.m" not in (root/"Makefile").read_text()
-print("PASS: manually triggered native refresh aligned to actual New Chat; long chat diagnostics")
+print("PASS: Native1 conversation paging unchanged; button-only manual refresh")
