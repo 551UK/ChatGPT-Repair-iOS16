@@ -63,7 +63,18 @@ static void CGPagingDeliverComplete(NSDictionary *newestRoot,
                                     NSURLResponse *responseTemplate,
                                     void (^completion)(NSData *,NSURLResponse *,NSError *)) {
     CGPagingTrace(@"DELIVER_CONVERSATION",200,allMessages.count,0);
-    NSData *legacy=CGConversationPagingLegacyData(newestRoot,allMessages,currentNode);
+    // Temporary device-side A/B test: bound the legacy renderer's linked-list
+    // size without modifying or deleting the complete conversation on the server.
+    // The network still loads all pages; only the 2024 UI representation is capped.
+    static const NSUInteger kDiagnosticMaxRenderMessages=250;
+    NSArray *renderMessages=allMessages;
+    if (allMessages.count>kDiagnosticMaxRenderMessages) {
+        CGPagingTrace(@"RENDER_WINDOW_TOTAL",200,allMessages.count,0);
+        renderMessages=[allMessages subarrayWithRange:NSMakeRange(
+            allMessages.count-kDiagnosticMaxRenderMessages,kDiagnosticMaxRenderMessages)];
+        CGPagingTrace(@"RENDER_WINDOW_SHOWN",200,renderMessages.count,0);
+    }
+    NSData *legacy=CGConversationPagingLegacyData(newestRoot,renderMessages,currentNode);
     if (!legacy.length) {
         completion(nil,responseTemplate,
             [NSError errorWithDomain:@"com.551uk.chatgptrepair.paging"
