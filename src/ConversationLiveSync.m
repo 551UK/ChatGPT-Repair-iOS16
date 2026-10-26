@@ -1,303 +1,210 @@
-// ChatGPTRepair: safe foreground change detection for the existing conversation.
-// Never navigates, never creates a chat, and never overlays reply text.
+// ChatGPTRepair: manual in-place conversation refresh.
+// No background polling, timed refreshes, chat navigation, or floating preview.
 #import "ConversationLiveSync.h"
 #import "ConversationPagingState.h"
-#import "ConversationPagingCore.h"
 #import "NativeConversationRefresh.h"
 #import <UIKit/UIKit.h>
-#import <objc/runtime.h>
-#import <objc/message.h>
 
-@interface NSURLSession (CGSyncOriginal)
-- (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request
-    completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler;
-@end
-
-static NSObject *CGSyncLock(void) {
+static NSObject *CGManualLock(void) {
     static NSObject *lock;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ lock=[NSObject new]; });
     return lock;
 }
-static NSString *sConversationID;
-static NSURLRequest *sConversationRequest;
-static NSURLSessionConfiguration *sConfiguration;
-static NSUInteger sGeneration;
-static NSUInteger sScheduleSerial;
-static NSUInteger sFailures;
-static BOOL sPollActive;
-static BOOL sDelivered;
-static BOOL sHasDeliveredHash;
-static NSUInteger sDeliveredHash;
-static BOOL sBusy;
-static NSTimeInterval sLastRefreshAttempt;
-static UIView *sIndicator;
-static UIActivityIndicatorView *sSpinner;
-static UILabel *sIndicatorLabel;
 
-static void CGSyncLog(NSString *event, NSInteger status, NSUInteger count) {
+static NSString *sSelectedConversation;
+static BOOL sConversationLoaded;
+static BOOL sHistoryVisible;
+static BOOL sRefreshInProgress;
+static NSUInteger sSelectionGeneration;
+static UIButton *sRefreshButton;
+static UIActivityIndicatorView *sRefreshSpinner;
+static __weak UIWindow *sRefreshWindow;
+
+static void CGManualLog(NSString *event) {
     @try {
         @synchronized([NSFileManager class]) {
             NSString *path=[NSHomeDirectory() stringByAppendingPathComponent:
                 @"Documents/ChatGPTRepairLiveSync.log"];
             NSFileManager *fm=[NSFileManager defaultManager];
-            NSDictionary *attributes=[fm attributesOfItemAtPath:path error:nil];
+            NSDictionary *attributes=[fm attributesOfItemAtPath:path error:NULL];
             if ([attributes[NSFileSize] unsignedLongLongValue]>262144)
-                [fm removeItemAtPath:path error:nil];
+                [fm removeItemAtPath:path error:NULL];
             if (![fm fileExistsAtPath:path])
                 [fm createFileAtPath:path contents:[NSData data] attributes:nil];
             NSFileHandle *handle=[NSFileHandle fileHandleForWritingAtPath:path];
             if (handle) {
                 [handle seekToEndOfFile];
                 NSString *line=[NSString stringWithFormat:
-                    @"%@ event=%@ status=%ld value=%lu\n",
-                    NSDate.date,event,(long)status,(unsigned long)count];
+                    @"%@ event=%@\n",NSDate.date,event];
                 [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
                 [handle closeFile];
             }
         }
     } @catch (__unused NSException *exception) {}
 }
+void CGChatSyncLogEvent(NSString *event) { CGManualLog(event); }
 
-void CGChatSyncLogEvent(NSString *event) { CGSyncLog(event,0,0); }
-
-static BOOL CGSyncForeground(void) {
-    return UIApplication.sharedApplication.applicationState==UIApplicationStateActive;
-}
-
-static void CGSyncStatus(NSString *state, BOOL visible) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *window=UIApplication.sharedApplication.keyWindow;
-        if (!window) window=UIApplication.sharedApplication.windows.firstObject;
-        if (!visible || !window || !CGSyncForeground()) {
-            sIndicator.hidden=YES;
-            [sSpinner stopAnimating];
-            return;
-        }
-        if (!sIndicator || sIndicator.superview!=window) {
-            [sIndicator removeFromSuperview];
-            UIView *panel=[[UIView alloc] initWithFrame:CGRectMake(0,0,124,30)];
-            panel.backgroundColor=[UIColor colorWithWhite:0.22 alpha:0.82];
-            panel.userInteractionEnabled=NO;
-            panel.layer.cornerRadius=15;
-            UIActivityIndicatorView *spinner=[[UIActivityIndicatorView alloc]
-                initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-            spinner.frame=CGRectMake(7,5,20,20);
-            spinner.color=UIColor.whiteColor;
-            [panel addSubview:spinner];
-            UILabel *label=[[UILabel alloc] initWithFrame:CGRectMake(31,0,88,30)];
-            label.font=[UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
-            label.textColor=UIColor.whiteColor;
-            label.adjustsFontSizeToFitWidth=YES;
-            [panel addSubview:label];
-            [window addSubview:panel];
-            sIndicator=panel;
-            sSpinner=spinner;
-            sIndicatorLabel=label;
-        }
-        CGFloat safe=window.safeAreaInsets.top;
-        CGFloat width=CGRectGetWidth(sIndicator.bounds);
-        CGFloat centerX=(CGRectGetWidth(window.bounds)-width)*0.5;
-        sIndicator.frame=CGRectMake(centerX,safe+56,width,30);
-        sIndicatorLabel.text=state ?: @"Checking";
-        sIndicator.hidden=NO;
-        if ([state isEqualToString:@"Checking"] || [state isEqualToString:@"Updating"])
-            [sSpinner startAnimating];
-        else
-            [sSpinner stopAnimating];
-    });
-}
-
-static BOOL CGSyncBusyValue(id raw) {
-    if ([raw isKindOfClass:NSString.class]) {
-        NSString *value=[(NSString *)raw lowercaseString];
-        return [@[@"running",@"processing",@"pending",@"in_progress",
-                 @"streaming",@"queued",@"generating",@"active"] containsObject:value];
+static void CGManualSetWorking(BOOL working) {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ CGManualSetWorking(working); });
+        return;
     }
-    if ([raw isKindOfClass:NSDictionary.class]) {
-        NSDictionary *dict=raw;
-        return CGSyncBusyValue(dict[@"status"]) ||
-               CGSyncBusyValue(dict[@"state"]) ||
-               CGSyncBusyValue(dict[@"phase"]);
+    sRefreshButton.enabled=!working;
+    sRefreshButton.imageView.hidden=working;
+    sRefreshSpinner.hidden=!working;
+    if (working) [sRefreshSpinner startAnimating];
+    else [sRefreshSpinner stopAnimating];
+}
+
+@interface CGManualRefreshAction : NSObject
++ (instancetype)shared;
+- (void)refresh:(id)sender;
+@end
+
+static void CGManualUpdateButton(void) {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ CGManualUpdateButton(); });
+        return;
     }
-    return NO;
+    BOOL ready=NO;
+    @synchronized(CGManualLock()) {
+        ready=sSelectedConversation.length && sConversationLoaded &&
+              !sHistoryVisible;
+    }
+    if (!ready || UIApplication.sharedApplication.applicationState!=UIApplicationStateActive) {
+        sRefreshButton.hidden=YES;
+        return;
+    }
+
+    UIWindow *window=UIApplication.sharedApplication.keyWindow;
+    if (!window) window=UIApplication.sharedApplication.windows.firstObject;
+    if (!window) { sRefreshButton.hidden=YES; return; }
+    if (!sRefreshButton || sRefreshWindow!=window) {
+        [sRefreshButton removeFromSuperview];
+        UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];
+        button.translatesAutoresizingMaskIntoConstraints=NO;
+        button.backgroundColor=UIColor.clearColor;
+        button.accessibilityLabel=@"Refresh conversation";
+        button.accessibilityHint=@"Fetch new messages in the current chat";
+        button.accessibilityTraits=UIAccessibilityTraitButton;
+        // User-supplied refresh-arrow icon, cropped to its transparent silhouette.
+        NSData *asset=[[NSData alloc] initWithBase64EncodedString:@"iVBORw0KGgoAAAANSUhEUgAAABgAAAAZCAYAAAArK+5dAAABjklEQVR42rVWPUsDQRB9ZxQsxMYiVhZahiiBQGy0CClEkUA6G63sxMpGqyhim8ZGBAv1B1gIKS0ESyGVHymiRYIgiEEbBX02czA5du/D3A0sw968ebO7czuzDkkkKQNIWAZD4jIAcgAmZX4P4ArAqwWfBdAC8AmStjFC8oj+8kJyh+Sw8quIbZ8kbORlA1mD5CnJc5J3BnuB5KKa12wBthTojeQqyZRlISWSHcvujAHmFODQ5/i8ox4mwBDJHzFWI5BXwu7gQAw3EciLPj9AjWTPPdgWvR7hN1/wsbUAwHv2nQirDzXcHRREXyRVKsZEPyUV4CvG2lQCQADLmvBZ9EQMAdZEj+skT0mS2zEk9kO4pr33wDXk+iCfF45v95upBt32EeBBOHZNARySXQHs/YO8Kr5dXRy9oLy66psRyI+V34y2mcAbCnxGMu1DPEuyqfBlL8axNP0lAJdq3gBQF50CkAewAiCtMEVpo70S0DJPAlrmu+Rr1MbjhHy2ZFXT/wXwCOAaQDvI0Un6XfQHl3x0gBJvwFIAAAAASUVORK5CYII="
+                                                          options:0];
+        UIImage *icon=[[UIImage imageWithData:asset]
+            imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+        if (!icon) icon=[UIImage systemImageNamed:@"arrow.clockwise"];
+        [button setImage:icon forState:UIControlStateNormal];
+        button.tintColor=[UIColor colorWithWhite:0.94 alpha:1];
+        button.imageView.contentMode=UIViewContentModeScaleAspectFit;
+        button.imageEdgeInsets=UIEdgeInsetsMake(9,9,9,9);
+        [button addTarget:[CGManualRefreshAction shared]
+                  action:@selector(refresh:)
+        forControlEvents:UIControlEventTouchUpInside];
+
+        UIActivityIndicatorView *spinner=[[UIActivityIndicatorView alloc]
+            initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+        spinner.translatesAutoresizingMaskIntoConstraints=NO;
+        spinner.hidesWhenStopped=YES;
+        spinner.color=UIColor.whiteColor;
+        spinner.userInteractionEnabled=NO;
+        [button addSubview:spinner];
+        [window addSubview:button];
+        // Place directly to the left of the original New Chat control.
+        [NSLayoutConstraint activateConstraints:@[
+            [button.widthAnchor constraintEqualToConstant:44],
+            [button.heightAnchor constraintEqualToConstant:44],
+            [button.trailingAnchor constraintEqualToAnchor:window.trailingAnchor constant:-56],
+            [button.topAnchor constraintEqualToAnchor:window.safeAreaLayoutGuide.topAnchor constant:-10],
+            [spinner.centerXAnchor constraintEqualToAnchor:button.centerXAnchor],
+            [spinner.centerYAnchor constraintEqualToAnchor:button.centerYAnchor]
+        ]];
+        sRefreshButton=button;
+        sRefreshSpinner=spinner;
+        sRefreshWindow=window;
+        CGManualSetWorking(sRefreshInProgress);
+    }
+    sRefreshButton.hidden=NO;
+    [window bringSubviewToFront:sRefreshButton];
 }
 
-static NSUInteger CGSyncSnapshotHash(NSDictionary *root, BOOL *busy) {
-    NSArray *messages=CGConversationPagingMessages(root);
-    NSDictionary *last=[messages.lastObject isKindOfClass:NSDictionary.class]
-        ?messages.lastObject:nil;
-    NSDictionary *message=[last[@"message"] isKindOfClass:NSDictionary.class]
-        ?last[@"message"]:last;
-    BOOL generating=CGSyncBusyValue(root[@"async_status"]) ||
-        CGSyncBusyValue(root[@"status"]) || CGSyncBusyValue(message[@"status"]) ||
-        CGSyncBusyValue(message[@"metadata"]);
-    if ([root[@"is_generating"] respondsToSelector:@selector(boolValue)])
-        generating=generating || [root[@"is_generating"] boolValue];
-    if (busy) *busy=generating;
-    NSArray *elements=@[
-        [root[@"current_node"] isKindOfClass:NSString.class]
-            ?root[@"current_node"]:@"-",
-        root[@"async_status"] ?: [NSNull null],
-        messages ?: @[]
-    ];
-    NSData *data=[NSJSONSerialization dataWithJSONObject:elements
-        options:NSJSONWritingSortedKeys error:NULL];
-    return data ? data.hash : 0;
+@implementation CGManualRefreshAction
++ (instancetype)shared {
+    static CGManualRefreshAction *instance;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ instance=[CGManualRefreshAction new]; });
+    return instance;
 }
-
-static void CGSyncRefreshInPlace(NSUInteger generation) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (!CGSyncForeground()) return;
-        NSString *cid;
-        @synchronized(CGSyncLock()) {
-            if (generation!=sGeneration) return;
-            cid=[sConversationID copy];
-        }
-        BOOL started=CGNativeRefreshConversation(cid,^(BOOL success) {
-            @synchronized(CGSyncLock()) {
-                if (generation!=sGeneration) return;
+- (void)refresh:(id)sender {
+    (void)sender;
+    if (!NSThread.isMainThread) return;
+    NSString *identifier=nil;
+    NSUInteger generation=0;
+    @synchronized(CGManualLock()) {
+        if (sRefreshInProgress || !sConversationLoaded ||
+            sHistoryVisible || !sSelectedConversation.length) return;
+        sRefreshInProgress=YES;
+        identifier=[sSelectedConversation copy];
+        generation=sSelectionGeneration;
+    }
+    CGManualLog(@"MANUAL_REFRESH_TAPPED");
+    CGManualSetWorking(YES);
+    BOOL started=CGNativeRefreshConversation(identifier,^(BOOL success) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            BOOL stillSelected=NO;
+            @synchronized(CGManualLock()) {
+                stillSelected=generation==sSelectionGeneration;
+                sRefreshInProgress=NO;
             }
-            CGSyncLog(success?@"NATIVE_REFRESH_COMPLETED":@"NATIVE_REFRESH_FAILED",0,0);
-            CGSyncStatus(@"Updating",NO);
+            CGManualLog(success?@"MANUAL_REFRESH_COMPLETED":
+                              @"MANUAL_REFRESH_FAILED");
+            CGManualSetWorking(NO);
+            if (stillSelected) CGManualUpdateButton();
         });
-        CGSyncLog(started?@"NATIVE_REFRESH_STARTED":@"IN_PLACE_REFRESH_UNAVAILABLE",0,0);
-        if (started) CGSyncStatus(@"Updating",YES);
     });
+    if (!started) {
+        CGManualLog(@"MANUAL_REFRESH_UNAVAILABLE");
+        @synchronized(CGManualLock()) { sRefreshInProgress=NO; }
+        CGManualSetWorking(NO);
+    } else {
+        CGManualLog(@"MANUAL_REFRESH_STARTED");
+    }
+}
+@end
+
+void CGChatManualSetHistoryVisible(BOOL visible) {
+    @synchronized(CGManualLock()) { sHistoryVisible=visible; }
+    CGManualUpdateButton();
 }
 
-static void CGSyncPoll(NSUInteger generation);
-static void CGSyncSchedule(NSUInteger generation, NSTimeInterval seconds) {
-    NSUInteger serial;
-    @synchronized(CGSyncLock()) {
-        if (generation!=sGeneration) return;
-        serial=++sScheduleSerial;
-    }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(seconds*NSEC_PER_SEC)),
-                   dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
-        @synchronized(CGSyncLock()) {
-            if (generation!=sGeneration || serial!=sScheduleSerial) return;
-        }
-        CGSyncPoll(generation);
-    });
-}
-
-static void CGSyncPoll(NSUInteger generation) {
-    NSURLRequest *request=nil;
-    NSURLSessionConfiguration *configuration=nil;
-    @synchronized(CGSyncLock()) {
-        if (generation!=sGeneration || !sConversationID || sPollActive)
-            return;
-        if (!CGSyncForeground()) return;
-        sPollActive=YES;
-        request=[sConversationRequest copy];
-        configuration=[sConfiguration copy];
-    }
-    if (!request) return;
-    CGSyncStatus(@"Checking",YES);
-    NSURLRequest *modern=CGPagingModernRequest(request,nil);
-    NSURLSessionConfiguration *config=configuration ?:
-        [NSURLSessionConfiguration defaultSessionConfiguration];
-    config.timeoutIntervalForRequest=25;
-    __block NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
-    NSURLSessionDataTask *task=[session cgp_dataTaskWithRequest:modern
-        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        [session finishTasksAndInvalidate]; session=nil;
-        NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
-            ?((NSHTTPURLResponse *)response).statusCode:0;
-        NSDictionary *root=(!error && status>=200 && status<300)
-            ?CGConversationPagingJSONObject(data):nil;
-        BOOL busy=NO;
-        NSUInteger hash=root?CGSyncSnapshotHash(root,&busy):0;
-        BOOL changed=NO,tryRefresh=NO;
-        NSTimeInterval nextDelay=8;
-        @synchronized(CGSyncLock()) {
-            if (generation!=sGeneration) return;
-            sPollActive=NO;
-            if (root) {
-                sFailures=0;
-                nextDelay=busy?3:8;
-                sBusy=busy;
-                changed=sDelivered && sHasDeliveredHash &&
-                    sDeliveredHash!=hash;
-                if (changed) {
-                    NSTimeInterval now=NSDate.date.timeIntervalSince1970;
-                    if (now-sLastRefreshAttempt>4) {
-                        tryRefresh=YES;
-                        sLastRefreshAttempt=now;
-                    }
-                }
-            } else {
-                sFailures=MIN(sFailures+1,5);
-                nextDelay=MAX(MIN(8*(1UL<<sFailures),120),CGPagingRetryAfter(response));
-            }
-        }
-        CGSyncLog(root?@"POLL_OK":@"POLL_FAILED",status,
-                  root?CGConversationPagingMessages(root).count:0);
-        if (changed) {
-            // This detects server changes; it does not claim the screen updated.
-            CGSyncLog(@"REMOTE_CHANGE_DETECTED",status,busy?1:0);
-            CGSyncStatus(@"Updating",YES);
-            if (tryRefresh) CGSyncRefreshInPlace(generation);
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),
-                           dispatch_get_main_queue(), ^{
-                CGSyncStatus(@"Updating",NO);
-            });
-        } else {
-            CGSyncStatus(@"Checking",busy);
-        }
-        CGSyncSchedule(generation,nextDelay);
-    }];
-    if (task) [task resume];
-    else {
-        [session invalidateAndCancel]; session=nil;
-        @synchronized(CGSyncLock()) {
-            if (generation==sGeneration) sPollActive=NO;
-        }
-        CGSyncStatus(@"Checking",NO);
-        CGSyncSchedule(generation,15);
-    }
-}
-
-void CGChatSyncTrackDetail(NSURLRequest *request, NSURLSessionConfiguration *config) {
-    NSString *cid=CGPagingConversationID(request);
-    if (!cid.length || !request) return;
-    @synchronized(CGSyncLock()) {
-        BOOL same=[sConversationID isEqualToString:cid] && sConversationRequest;
-        sConversationRequest=[request copy];
-        sConfiguration=[config copy];
-        if (same) return;
-        sConversationID=[cid copy];
-        sFailures=0;
-        sGeneration++;
-        sPollActive=NO;
-        sDelivered=NO;
-        sHasDeliveredHash=NO;
-        sBusy=NO;
-        sLastRefreshAttempt=0;
-    }
-    CGSyncLog(@"TRACK_CONVERSATION",0,0);
-}
-void CGChatSyncMarkDelivered(NSURLRequest *request, NSDictionary *root) {
+void CGChatSyncTrackDetail(NSURLRequest *request,
+                           NSURLSessionConfiguration *configuration) {
+    (void)configuration;
     NSString *cid=CGPagingConversationID(request);
     if (!cid.length) return;
-    BOOL busy=NO;
-    NSUInteger hash=CGSyncSnapshotHash(root,&busy);
-    NSUInteger token=0;
-    @synchronized(CGSyncLock()) {
-        if (![sConversationID isEqualToString:cid]) return;
-        BOOL first=!sDelivered;
-        sDelivered=YES;
-        sBusy=busy;
-        sDeliveredHash=hash;
-        sHasDeliveredHash=YES;
-        if (first) token=sGeneration;
+    @synchronized(CGManualLock()) {
+        if ([sSelectedConversation isEqualToString:cid]) return;
+        sSelectedConversation=[cid copy];
+        sSelectionGeneration++;
+        sConversationLoaded=NO;
+        sRefreshInProgress=NO;
     }
-    CGSyncLog(@"CONVERSATION_DELIVERED",0,busy?1:0);
-    if (token) CGSyncSchedule(token,5);
+    CGManualLog(@"MANUAL_CHAT_SELECTED");
+    CGManualUpdateButton();
 }
 
-__attribute__((constructor)) static void CGSyncInstall(void) {
+void CGChatSyncMarkDelivered(NSURLRequest *request, NSDictionary *root) {
+    (void)root;
+    NSString *cid=CGPagingConversationID(request);
+    if (!cid.length) return;
+    @synchronized(CGManualLock()) {
+        if (![sSelectedConversation isEqualToString:cid]) return;
+        sConversationLoaded=YES;
+    }
+    CGManualUpdateButton();
+}
+
+__attribute__((constructor)) static void CGManualInstall(void) {
     if (![[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.openai.chat"])
         return;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -305,12 +212,13 @@ __attribute__((constructor)) static void CGSyncInstall(void) {
             addObserverForName:UIApplicationDidBecomeActiveNotification
             object:nil queue:NSOperationQueue.mainQueue
             usingBlock:^(__unused NSNotification *note) {
-                NSUInteger generation=0;
-                @synchronized(CGSyncLock()) {
-                    if (sDelivered) generation=sGeneration;
-                }
-                if (generation) CGSyncSchedule(generation,1);
-                CGSyncStatus(@"Checking",NO);
+                CGManualUpdateButton();  // UI only; never refresh automatically.
+            }];
+        [[NSNotificationCenter defaultCenter]
+            addObserverForName:UIApplicationWillResignActiveNotification
+            object:nil queue:NSOperationQueue.mainQueue
+            usingBlock:^(__unused NSNotification *note) {
+                sRefreshButton.hidden=YES;
             }];
     });
 }

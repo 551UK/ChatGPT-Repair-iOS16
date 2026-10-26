@@ -61,26 +61,27 @@ assert "CGConversationPagingHasVersionMarkers" not in (root/"src/ConversationPag
 sync=(root/"src/ConversationLiveSync.m").read_text()
 assert "CGChatSyncTrackDetail" in sync
 assert "CGChatSyncMarkDelivered" in sync
-assert "UIApplicationDidBecomeActiveNotification" in sync
+assert "CGChatManualSetHistoryVisible" in sync
 assert "src/ConversationLiveSync.m" in (root/"Makefile").read_text()
-assert "NSJSONWritingSortedKeys" in sync
+assert "CGNativeRefreshConversation(identifier" in sync
+assert "MANUAL_REFRESH_TAPPED" in sync
+assert "MANUAL_REFRESH_COMPLETED" in sync
+assert "MANUAL_REFRESH_UNAVAILABLE" in sync
+assert "Refresh conversation" in sync
+assert "initWithBase64EncodedString" in sync
+assert "constraintEqualToAnchor:window.trailingAnchor constant:-56" in sync
+assert "constraintEqualToAnchor:window.safeAreaLayoutGuide.topAnchor constant:-10" in sync
 assert "UIActivityIndicatorView" in sync
-assert 'CGFloat centerX=(CGRectGetWidth(window.bounds)-width)*0.5;' in sync
-assert "REMOTE_CHANGE_DETECTED" in sync
-assert "IN_PLACE_REFRESH_UNAVAILABLE" in sync
-assert "CGSyncRefreshInPlace" in sync
-assert "kDiagnosticMaxRenderMessages" not in paging_network
-# Safety guards: never open or reselect chats, and never show a text preview.
-assert "CG46OpenPin" not in sync
-assert "CGSyncReopenCurrentConversation" not in sync
-assert "RESELECT_NATIVE_DISPATCHED" not in sync
-assert "NATIVE_RESELECT" not in sync
-assert "CGSyncPreviewUpdate" not in sync
-assert "CGSyncPreviewHide" not in sync
-assert "Live reply preview" not in sync
+assert "UIApplicationDidBecomeActiveNotification" in sync
+# Important: the user explicitly opted out of background polling and chat reopening.
+for forbidden in ("CGSyncPoll", "CGSyncSchedule", "CGSyncReopenCurrentConversation",
+                  "CGSyncPreviewUpdate", "REMOTE_CHANGE_DETECTED",
+                  "CG46OpenPin", "NATIVE_RESELECT", "dataTaskWithRequest:",
+                  "CGPagingModernRequest", "POLL_OK", "Live reply preview"):
+    assert forbidden not in sync, forbidden
+assert "CGChatManualSetHistoryVisible(YES)" in (root/"src/PinnedSidebarIntegration.m").read_text()
+assert "CGChatManualSetHistoryVisible(NO)" in (root/"src/PinnedSidebarIntegration.m").read_text()
 assert "ConversationLivePreview" not in (root/"Makefile").read_text()
-pins=(root/"src/PinnedSidebarIntegration.m").read_text()
-assert "CGChatSyncRememberHistoryController" not in pins
 assert not (root/"src/ConversationLivePreview.m").exists()
-assert not (root/"src/ConversationLivePreview.h").exists()
-print("PASS: clean source-only tree and existing repair regression guards")
+assert "kDiagnosticMaxRenderMessages" not in paging_network
+print("PASS: manual-only native refresh, supplied icon, and stable large-chat logic")
