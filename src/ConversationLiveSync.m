@@ -18,7 +18,6 @@ static BOOL sRefreshInProgress;
 static NSUInteger sSelectionGeneration;
 static UIButton *sRefreshButton;
 static UIActivityIndicatorView *sRefreshSpinner;
-static __weak UIWindow *sRefreshWindow;
 
 static void CGManualLog(NSString *event) {
     @try {
@@ -61,6 +60,73 @@ static void CGManualSetWorking(BOOL working) {
 - (void)refresh:(id)sender;
 @end
 
+
+static UIView *CGManualNewChatControlIn(UIView *root, UIWindow *window,
+                                       CGFloat safe, NSUInteger depth) {
+    if (!root || !window || depth>35) return nil;
+    NSMutableArray<UIView *> *candidates=[NSMutableArray array];
+    NSMutableArray<NSNumber *> *scores=[NSMutableArray array];
+    NSMutableArray<UIView *> *stack=[NSMutableArray arrayWithObject:root];
+    NSUInteger visited=0;
+    while (stack.count && visited++<3000) {
+        UIView *view=stack.lastObject;
+        [stack removeLastObject];
+        if (view==sRefreshButton || view.hidden || view.alpha<0.05) continue;
+        for (UIView *child in view.subviews) [stack addObject:child];
+        CGRect bounds=[view convertRect:view.bounds toView:window];
+        if (CGRectIsEmpty(bounds) || !isfinite(bounds.origin.x) ||
+            !isfinite(bounds.origin.y) || bounds.size.width<14 ||
+            bounds.size.height<14 || bounds.size.width>100 ||
+            bounds.size.height>100) continue;
+        CGFloat mx=CGRectGetMidX(bounds),my=CGRectGetMidY(bounds);
+        if (mx<window.bounds.size.width*0.70 || mx>window.bounds.size.width-4 ||
+            my<safe-22 || my>safe+82) continue;
+        NSString *label=[view.accessibilityLabel ?: @"" lowercaseString];
+        NSString *ident=[view.accessibilityIdentifier ?: @"" lowercaseString];
+        NSString *value=[NSString stringWithFormat:@"%@ %@",label,ident];
+        if ([view isKindOfClass:UIButton.class]) {
+            NSString *title=[(UIButton *)view titleForState:UIControlStateNormal];
+            if (title.length)
+                value=[value stringByAppendingFormat:@" %@",title.lowercaseString];
+        }
+        if ([value containsString:@"refresh"]) continue;
+        BOOL newChat=([value containsString:@"new chat"] ||
+            [value containsString:@"new conversation"] ||
+            [value containsString:@"compose"] ||
+            [value containsString:@"start chat"]);
+        BOOL interactive=[view isKindOfClass:UIControl.class] ||
+            (view.accessibilityTraits & UIAccessibilityTraitButton)!=0;
+        if (!newChat && !interactive) continue;
+        CGFloat score=newChat?1000:0;
+        score+=100.0-MIN(100.0,fabs(window.bounds.size.width-26-mx));
+        score+=50.0-MIN(50.0,fabs(safe+21-my));
+        if ([view isKindOfClass:UIButton.class]) score+=10;
+        [candidates addObject:view];
+        [scores addObject:@(score)];
+    }
+    NSUInteger best=NSNotFound;
+    for (NSUInteger i=0;i<scores.count;i++) {
+        if (best==NSNotFound || scores[i].doubleValue>scores[best].doubleValue)
+            best=i;
+    }
+    return best==NSNotFound?nil:candidates[best];
+}
+static CGRect CGManualButtonFrame(UIView *host, UIWindow *window, BOOL *anchored) {
+    CGFloat safe=window.safeAreaInsets.top;
+    UIView *target=CGManualNewChatControlIn(window.rootViewController.view,window,safe,0);
+    CGRect inWindow;
+    if (target) {
+        CGRect r=[target convertRect:target.bounds toView:window];
+        // Adjacent 44pt touch areas, both vertically aligned.
+        inWindow=CGRectMake(CGRectGetMidX(r)-66,CGRectGetMidY(r)-22,44,44);
+    } else {
+        // Fallback tracks the original New Chat position on this iOS 16 layout.
+        inWindow=CGRectMake(CGRectGetWidth(window.bounds)-94,safe-2,44,44);
+    }
+    if (anchored) *anchored=target!=nil;
+    return [host convertRect:inWindow fromView:window];
+}
+
 static void CGManualUpdateButton(void) {
     if (!NSThread.isMainThread) {
         dispatch_async(dispatch_get_main_queue(), ^{ CGManualUpdateButton(); });
@@ -78,10 +144,11 @@ static void CGManualUpdateButton(void) {
     UIWindow *window=UIApplication.sharedApplication.keyWindow;
     if (!window) window=UIApplication.sharedApplication.windows.firstObject;
     if (!window) { sRefreshButton.hidden=YES; return; }
-    if (!sRefreshButton || sRefreshWindow!=window) {
+    UIView *host=window.rootViewController.view ?: window;
+    if (!sRefreshButton || sRefreshButton.superview!=host) {
         [sRefreshButton removeFromSuperview];
         UIButton *button=[UIButton buttonWithType:UIButtonTypeCustom];
-        button.translatesAutoresizingMaskIntoConstraints=NO;
+        button.translatesAutoresizingMaskIntoConstraints=YES;
         button.backgroundColor=UIColor.clearColor;
         button.accessibilityLabel=@"Refresh conversation";
         button.accessibilityHint=@"Fetch new messages in the current chat";
@@ -102,28 +169,29 @@ static void CGManualUpdateButton(void) {
 
         UIActivityIndicatorView *spinner=[[UIActivityIndicatorView alloc]
             initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-        spinner.translatesAutoresizingMaskIntoConstraints=NO;
+        spinner.translatesAutoresizingMaskIntoConstraints=YES;
+        spinner.frame=CGRectMake(12,12,20,20);
+        spinner.autoresizingMask=UIViewAutoresizingFlexibleLeftMargin |
+            UIViewAutoresizingFlexibleRightMargin;
         spinner.hidesWhenStopped=YES;
         spinner.color=UIColor.whiteColor;
         spinner.userInteractionEnabled=NO;
         [button addSubview:spinner];
-        [window addSubview:button];
-        // Place directly to the left of the original New Chat control.
-        [NSLayoutConstraint activateConstraints:@[
-            [button.widthAnchor constraintEqualToConstant:44],
-            [button.heightAnchor constraintEqualToConstant:44],
-            [button.trailingAnchor constraintEqualToAnchor:window.trailingAnchor constant:-56],
-            [button.topAnchor constraintEqualToAnchor:window.safeAreaLayoutGuide.topAnchor constant:-10],
-            [spinner.centerXAnchor constraintEqualToAnchor:button.centerXAnchor],
-            [spinner.centerYAnchor constraintEqualToAnchor:button.centerYAnchor]
-        ]];
+        [host addSubview:button];
         sRefreshButton=button;
         sRefreshSpinner=spinner;
-        sRefreshWindow=window;
         CGManualSetWorking(sRefreshInProgress);
     }
+    BOOL matched=NO;
+    sRefreshButton.frame=CGManualButtonFrame(host,window,&matched);
     sRefreshButton.hidden=NO;
-    [window bringSubviewToFront:sRefreshButton];
+    [host bringSubviewToFront:sRefreshButton];
+    // The app renders New Chat in SwiftUI. Log which positioning route worked.
+    static NSInteger lastPlacement=-1;
+    if (lastPlacement!=(NSInteger)matched) {
+        CGManualLog(matched?@"MANUAL_BUTTON_ALIGNED":@"MANUAL_BUTTON_FALLBACK");
+        lastPlacement=matched;
+    }
 }
 
 @implementation CGManualRefreshAction
@@ -197,8 +265,8 @@ void CGChatSyncMarkDelivered(NSURLRequest *request, NSDictionary *root) {
         if (![sSelectedConversation isEqualToString:cid]) return;
         sConversationLoaded=YES;
     }
-    // Loading and merging older pages can take time. Draw only after the
-    // current network completion has returned to the app and UIKit is idle.
+    // The button is added to the existing root view, not the UIWindow layout.
+    // Never instantiate it during an in-flight paginated conversation request.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1500*NSEC_PER_MSEC)),
                    dispatch_get_main_queue(), ^{
         CGManualUpdateButton();

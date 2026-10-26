@@ -67,8 +67,13 @@ static void CGPagingDeliverComplete(NSDictionary *newestRoot,
                                     NSURLResponse *responseTemplate,
                                     void (^completion)(NSData *,NSURLResponse *,NSError *)) {
     CGPagingTrace(@"DELIVER_CONVERSATION",200,allMessages.count,0);
+    // Distinguish a slow older-page fetch from a legacy view that blanks
+    // after receiving a very large conversation. Keep ALL messages.
+    if (allMessages.count>300)
+        CGPagingTrace(@"LARGE_CHAT_HANDOFF",200,allMessages.count,0);
     NSData *legacy=CGConversationPagingLegacyData(newestRoot,allMessages,currentNode);
     if (!legacy.length) {
+        CGPagingTrace(@"LEGACY_SERIALIZATION_FAILED",0,allMessages.count,0);
         completion(nil,responseTemplate,
             [NSError errorWithDomain:@"com.551uk.chatgptrepair.paging"
                                 code:2
@@ -86,6 +91,7 @@ static void CGPagingDeliverComplete(NSDictionary *newestRoot,
     completion(legacy,
                CGPagingLegacyResponse(responseTemplate,originalRequest.URL,legacy.length),
                nil);
+    CGPagingTrace(@"LEGACY_CALLBACK_RETURNED",200,allMessages.count,0);
 }
 
 static void CGPagingFetchOlderPage(NSURLSessionConfiguration *configuration,

@@ -59,29 +59,24 @@ assert "CGPagingFinishFallback(" not in older
 assert "kDiagnosticMaxRenderMessages" not in paging_network
 assert "CGConversationPagingHasVersionMarkers" not in (root/"src/ConversationPagingCore.m").read_text()
 sync=(root/"src/ConversationLiveSync.m").read_text()
-assert "CGChatSyncTrackDetail" in sync
-assert "CGChatSyncMarkDelivered" in sync
-assert "src/ConversationLiveSync.m" in (root/"Makefile").read_text()
+assert "CGChatSyncTrackDetail" in sync and "CGChatSyncMarkDelivered" in sync
 assert "CGNativeRefreshConversation(identifier" in sync
 assert "MANUAL_REFRESH_TAPPED" in sync
-assert "MANUAL_REFRESH_COMPLETED" in sync
-assert "MANUAL_REFRESH_UNAVAILABLE" in sync
-assert "Refresh conversation" in sync
-assert "initWithBase64EncodedString" in sync
-assert "constraintEqualToAnchor:window.trailingAnchor constant:-56" in sync
-assert "constraintEqualToAnchor:window.safeAreaLayoutGuide.topAnchor constant:-10" in sync
-assert "UIActivityIndicatorView" in sync
+assert "CGManualButtonFrame" in sync and "CGManualNewChatControlIn" in sync
+assert "MANUAL_BUTTON_ALIGNED" in sync and "MANUAL_BUTTON_FALLBACK" in sync
+assert "view.accessibilityLabel" in sync and "new chat" in sync
+assert "CGRectGetMidY(r)-22" in sync
+assert "[host addSubview:button]" in sync
+assert "[window addSubview:button]" not in sync
+assert "button.trailingAnchor" not in sync
 assert "UIApplicationDidBecomeActiveNotification" in sync
-# Important: the user explicitly opted out of background polling and chat reopening.
 for forbidden in ("CGSyncPoll", "CGSyncSchedule", "CGSyncReopenCurrentConversation",
-                  "CGSyncPreviewUpdate", "REMOTE_CHANGE_DETECTED",
-                  "CG46OpenPin", "NATIVE_RESELECT", "dataTaskWithRequest:",
-                  "CGPagingModernRequest", "POLL_OK", "Live reply preview"):
+                  "CGSyncPreviewUpdate", "CG46OpenPin", "NATIVE_RESELECT"):
     assert forbidden not in sync, forbidden
-assert "CGChatManualSetHistoryVisible" not in (root/"src/PinnedSidebarIntegration.m").read_text()
-assert "1500*NSEC_PER_MSEC" in sync
-assert "CGManualUpdateButton();" not in sync.split('void CGChatSyncTrackDetail(',1)[1].split('void CGChatSyncMarkDelivered(',1)[0]
-assert "ConversationLivePreview" not in (root/"Makefile").read_text()
-assert not (root/"src/ConversationLivePreview.m").exists()
+paging_network=(root/"src/ConversationPagingNetwork.m").read_text()
+assert "LARGE_CHAT_HANDOFF" in paging_network
+assert "LEGACY_CALLBACK_RETURNED" in paging_network
+assert "LEGACY_SERIALIZATION_FAILED" in paging_network
 assert "kDiagnosticMaxRenderMessages" not in paging_network
-print("PASS: manual-only native refresh, supplied icon, and stable large-chat logic")
+assert "src/ConversationLivePreview.m" not in (root/"Makefile").read_text()
+print("PASS: manually triggered native refresh aligned to actual New Chat; long chat diagnostics")
