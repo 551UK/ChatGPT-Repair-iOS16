@@ -269,6 +269,42 @@ static BOOL CGSyncVisible(void) {
     return app.applicationState==UIApplicationStateActive;
 }
 
+// Only observe native ObjC-visible methods; do not invoke unknown Swift ABI.
+static void CGSyncTraceRefreshMethods(id object) {
+    if (!object) return;
+    static NSMutableSet<NSString *> *seenClasses;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ seenClasses=[NSMutableSet set]; });
+    Class cls=object_getClass(object);
+    NSString *className=NSStringFromClass(cls);
+    if (!className.length) return;
+    @synchronized(seenClasses) {
+        if ([seenClasses containsObject:className]) return;
+        [seenClasses addObject:className];
+    }
+    NSUInteger found=0;
+    for (Class c=cls; c && c!=NSObject.class && found<14;
+         c=class_getSuperclass(c)) {
+        unsigned int count=0;
+        Method *methods=class_copyMethodList(c,&count);
+        for (unsigned int i=0;i<count && found<14;i++) {
+            NSString *name=NSStringFromSelector(method_getName(methods[i]));
+            NSString *lower=name.lowercaseString;
+            if (![lower containsString:@"refresh"] &&
+                ![lower containsString:@"reload"] &&
+                ![lower containsString:@"conversation"] &&
+                ![lower containsString:@"snapshot"])
+                continue;
+            NSUInteger argc=method_getNumberOfArguments(methods[i]);
+            NSString *entry=[NSString stringWithFormat:@"NATIVE_METHOD_%@_%@",
+                className,name];
+            CGSyncLog(entry,0,argc);
+            found++;
+        }
+        free(methods);
+    }
+    CGSyncLog(@"NATIVE_METHOD_SCAN_COMPLETE",0,found);
+}
 static BOOL CGSyncTryRefreshObject(id object) {
     if (!object) return NO;
     for (NSString *name in @[@"refreshConversation",@"reloadConversation"]) {
@@ -299,10 +335,12 @@ static BOOL CGSyncRefreshController(UIViewController *vc, NSMutableSet *seen) {
         [type localizedCaseInsensitiveContainsString:@"Message"]) &&
         ![type localizedCaseInsensitiveContainsString:@"History"];
     if (candidate && canInvoke) {
+        CGSyncTraceRefreshMethods(vc);
         if (CGSyncTryRefreshObject(vc)) return YES;
         for (NSString *key in @[@"viewModel",@"conversationViewModel"]) {
             @try {
                 id model=[vc valueForKey:key];
+                CGSyncTraceRefreshMethods(model);
                 if (CGSyncTryRefreshObject(model)) return YES;
             } @catch (__unused NSException *exception) {}
         }

@@ -108,4 +108,8 @@ preview=(root/"src/ConversationLivePreview.m").read_text()
 assert "Live reply preview" in preview
 assert "CGSyncPreviewUpdate" in preview and "gText.text=display" in preview
 assert "CGSyncPreviewHide" in preview
+# Surface actual ObjC selectors before choosing a private Swift refresh method.
+assert "CGSyncTraceRefreshMethods" in sync
+assert "NATIVE_METHOD_SCAN_COMPLETE" in sync
+assert "method_getNumberOfArguments" in sync
 print("PASS: clean source-only tree and existing repair regression guards")
