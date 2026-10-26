@@ -64,4 +64,14 @@ assert "CGChatSyncMarkDelivered" in sync
 assert "CGSyncRequestUIRefresh" in sync
 assert "UIApplicationDidBecomeActiveNotification" in sync
 assert "src/ConversationLiveSync.m" in (root/"Makefile").read_text()
+# Cross-device changes must remain detectable after the first eight polls.
+assert "sSyncPolls>=8" not in sync
+assert "sSyncPolls>=60" not in sync
+assert "shouldRetry=YES" in sync
+assert "NSJSONWritingSortedKeys" in sync
+assert "messages ?: @[]" in sync
+assert "CGSyncIndicator" in sync and "UIActivityIndicatorView" in sync
+assert "CGSyncReopenCurrentConversation" in sync
+assert "NATIVE_RESELECT" in sync
+assert "kDiagnosticMaxRenderMessages" not in paging_network
 print("PASS: clean source-only tree and existing repair regression guards")

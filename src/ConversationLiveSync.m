@@ -19,10 +19,14 @@ static NSObject *CGSyncLock(void) {
     return lock;
 }
 static NSString *sSyncID;
+static NSString *sSyncTitle;
 static NSURLRequest *sSyncRequest;
 static NSURLSessionConfiguration *sSyncConfiguration;
 static NSUInteger sSyncGeneration;
 static NSUInteger sSyncPolls;
+static UIView *sSyncOverlay;
+static UIActivityIndicatorView *sSyncSpinner;
+static UILabel *sSyncLabel;
 static NSUInteger sSyncSignature;
 static BOOL sSyncHasSignature;
 static BOOL sSyncDelivered;
@@ -54,6 +58,77 @@ static void CGSyncLog(NSString *event, NSInteger status, NSUInteger count) {
     } @catch (__unused NSException *exception) {}
 }
 
+// Passive overlay sits below the chat navigation bar and never intercepts taps.
+static void CGSyncIndicator(NSString *state, BOOL visible) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        BOOL show=visible &&
+            UIApplication.sharedApplication.applicationState==UIApplicationStateActive;
+        UIWindow *window=UIApplication.sharedApplication.keyWindow;
+        if (!window) window=UIApplication.sharedApplication.windows.firstObject;
+        if (!show || !window) {
+            sSyncOverlay.hidden=YES;
+            [sSyncSpinner stopAnimating];
+            return;
+        }
+        if (!sSyncOverlay || sSyncOverlay.superview!=window) {
+            [sSyncOverlay removeFromSuperview];
+            UIView *panel=[[UIView alloc] initWithFrame:CGRectMake(0,0,124,30)];
+            panel.userInteractionEnabled=NO;
+            panel.layer.cornerRadius=15;
+            panel.backgroundColor=[UIColor colorWithWhite:0.22 alpha:0.82];
+            UIActivityIndicatorView *indicator=[[UIActivityIndicatorView alloc]
+                initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+            indicator.frame=CGRectMake(7,5,20,20);
+            indicator.color=UIColor.whiteColor;
+            [panel addSubview:indicator];
+            UILabel *label=[[UILabel alloc] initWithFrame:CGRectMake(31,0,88,30)];
+            label.font=[UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+            label.textColor=UIColor.whiteColor;
+            label.adjustsFontSizeToFitWidth=YES;
+            [panel addSubview:label];
+            [window addSubview:panel];
+            sSyncOverlay=panel;
+            sSyncSpinner=indicator;
+            sSyncLabel=label;
+        }
+        CGFloat safe=window.safeAreaInsets.top;
+        sSyncOverlay.frame=CGRectMake(window.bounds.size.width-140,safe+56,124,30);
+        sSyncLabel.text=state ?: @"Syncing";
+        sSyncOverlay.hidden=NO;
+        [sSyncSpinner startAnimating];
+    });
+}
+
+static UIViewController *CGSyncFindHistoryController(UIViewController *vc,
+                                                    NSMutableSet *visited) {
+    if (!vc || [visited containsObject:vc]) return nil;
+    [visited addObject:vc];
+    if ([NSStringFromClass(vc.class) containsString:@"HistoryViewController"])
+        return vc;
+    for (UIViewController *child in vc.childViewControllers) {
+        UIViewController *hit=CGSyncFindHistoryController(child,visited);
+        if (hit) return hit;
+    }
+    if (vc.presentedViewController) {
+        UIViewController *hit=CGSyncFindHistoryController(vc.presentedViewController,visited);
+        if (hit) return hit;
+    }
+    return nil;
+}
+extern BOOL CG46OpenPin(UIViewController *,NSString *,NSString *);
+static BOOL CGSyncReopenCurrentConversation(NSString *identifier, NSString *title) {
+    if (![[NSUUID alloc] initWithUUIDString:identifier]) return NO;
+    NSMutableSet *visited=[NSMutableSet set];
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        UIViewController *history=CGSyncFindHistoryController(window.rootViewController,visited);
+        if (!history) continue;
+        @try {
+            return CG46OpenPin(history,identifier,title.length?title:@"Chat");
+        } @catch (__unused NSException *exception) {}
+    }
+    return NO;
+}
+
 static BOOL CGSyncStatusBusy(id raw) {
     if ([raw isKindOfClass:NSString.class]) {
         NSString *s=[(NSString *)raw lowercaseString];
@@ -82,14 +157,15 @@ static NSUInteger CGSyncFingerprint(NSDictionary *root, BOOL *busyOut) {
         ([root[@"is_generating"] respondsToSelector:@selector(boolValue)] &&
          [root[@"is_generating"] boolValue]);
     if (busyOut) *busyOut=busy;
-    // Hash local state, never log the reply, message IDs, or request credentials.
-    NSMutableArray *parts=[NSMutableArray array];
-    [parts addObject:[root[@"current_node"] isKindOfClass:NSString.class]
-                     ?root[@"current_node"]:@"-"];
-    [parts addObject:async ?: [NSNull null]];
-    [parts addObject:@(messages.count)];
-    if (last) [parts addObject:last];
-    NSData *encoded=[NSJSONSerialization dataWithJSONObject:parts options:0 error:NULL];
+    // Snapshot every message in the newest page, so edits and regenerations
+    // of existing messages are detected, not just newly appended messages.
+    NSArray *parts=@[
+        [root[@"current_node"] isKindOfClass:NSString.class]?root[@"current_node"]:@"-",
+        async ?: [NSNull null],
+        messages ?: @[]
+    ];
+    NSData *encoded=[NSJSONSerialization dataWithJSONObject:parts
+        options:NSJSONWritingSortedKeys error:NULL];
     return encoded ? encoded.hash : 0;
 }
 
@@ -152,7 +228,16 @@ static void CGSyncRequestUIRefresh(void) {
                 refreshed=YES; break;
             }
         }
-        CGSyncLog(refreshed?@"NATIVE_REFRESH":@"NO_NATIVE_REFRESH_SELECTOR",0,0);
+        if (!refreshed) {
+            NSString *cid=nil,*title=nil;
+            @synchronized(CGSyncLock()) {
+                cid=[sSyncID copy]; title=[sSyncTitle copy];
+            }
+            refreshed=CGSyncReopenCurrentConversation(cid,title);
+            CGSyncLog(refreshed?@"NATIVE_RESELECT":@"NO_NATIVE_REFRESH",0,0);
+        } else {
+            CGSyncLog(@"NATIVE_REFRESH",0,0);
+        }
     });
 }
 
@@ -171,16 +256,14 @@ static void CGSyncPoll(NSUInteger generation) {
         if (generation!=sSyncGeneration || !sSyncID || sSyncRequestActive)
             return;
         if (!CGSyncVisible()) return; // Foreground notification restarts polling.
-        if (sSyncPolls>=60 || (!sSyncBusy && sSyncPolls>=8)) {
-            CGSyncLog(@"MONITOR_IDLE",0,sSyncPolls);
-            return;
-        }
+        // Stay subscribed while the app is foregrounded; no finite poll cap.
         sSyncRequestActive=YES;
         sSyncPolls++;
         request=[sSyncRequest copy];
         configuration=[sSyncConfiguration copy];
     }
     if (!request) return;
+    CGSyncIndicator(@"Checking",YES);
     NSURLRequest *modern=CGPagingModernRequest(request,nil);
     NSURLSessionConfiguration *config=configuration ?: [NSURLSessionConfiguration defaultSessionConfiguration];
     config.timeoutIntervalForRequest=25;
@@ -205,7 +288,7 @@ static void CGSyncPoll(NSUInteger generation) {
                 sSyncHasSignature=YES;
                 sSyncBusy=busy;
             }
-            shouldRetry=sSyncPolls<60 && (sSyncBusy || sSyncPolls<8);
+            shouldRetry=YES;
             if (changed) {
                 NSTimeInterval now=NSDate.date.timeIntervalSince1970;
                 if (now-sSyncLastUIRefresh<8) changed=NO;
@@ -215,9 +298,18 @@ static void CGSyncPoll(NSUInteger generation) {
         CGSyncLog(root?@"POLL_OK":@"POLL_FAILED",status,root?CGConversationPagingMessages(root).count:0);
         if (changed) {
             CGSyncLog(@"REMOTE_MESSAGE_CHANGED",status,busy?1:0);
+            CGSyncIndicator(@"Updating",YES);
             CGSyncRequestUIRefresh();
         }
-        if (shouldRetry) CGSyncSchedule(generation,busy?8:12);
+        if (changed) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(3*NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                CGSyncIndicator(@"Updating",NO);
+            });
+        } else {
+            CGSyncIndicator(@"Checking",busy);
+        }
+        if (shouldRetry) CGSyncSchedule(generation,busy?6:15);
     }];
     if (task) [task resume];
     else {
@@ -236,6 +328,7 @@ void CGChatSyncTrackDetail(NSURLRequest *request, NSURLSessionConfiguration *con
     @synchronized(CGSyncLock()) {
         if ([sSyncID isEqualToString:cid] && sSyncRequest) return;
         sSyncID=[cid copy];
+        sSyncTitle=nil;
         sSyncRequest=[request copy];
         sSyncConfiguration=[config copy];
         sSyncGeneration++;
@@ -258,6 +351,8 @@ void CGChatSyncMarkDelivered(NSURLRequest *request, NSDictionary *root) {
     NSUInteger token=0;
     @synchronized(CGSyncLock()) {
         if (![sSyncID isEqualToString:cid]) return;
+        if ([root[@"title"] isKindOfClass:NSString.class])
+            sSyncTitle=[root[@"title"] copy];
         if (!sSyncHasSignature) {
             sSyncSignature=signature;
             sSyncHasSignature=YES;
@@ -283,6 +378,7 @@ __attribute__((constructor)) static void CGSyncBoot(void) {
                     token=sSyncDelivered?sSyncGeneration:0;
                 }
                 if (token) CGSyncSchedule(token,1);
+                CGSyncIndicator(@"Checking",NO);
             }];
     });
 }
