@@ -2,6 +2,7 @@
 #import "ConversationPagingCompat.h"
 #import "ConversationPagingState.h"
 #import "ConversationPagingCore.h"
+#import "ConversationLiveSync.h"
 
 @interface NSURLSession (CGConversationPagingOriginal)
 - (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request
@@ -71,6 +72,7 @@ static void CGPagingDeliverComplete(NSDictionary *newestRoot,
                             userInfo:@{NSLocalizedDescriptionKey:@"Unable to convert complete conversation page set"}]);
         return;
     }
+    CGChatSyncMarkDelivered(originalRequest,newestRoot);
     completion(legacy,
                CGPagingLegacyResponse(responseTemplate,originalRequest.URL,legacy.length),
                nil);
@@ -256,6 +258,7 @@ NSURLRequest *CGConversationPagingPrepareDetailRequest(NSURLRequest *originalReq
         }
         if (generationOut) *generationOut=CGPagingGeneration;
     }
+    CGChatSyncTrackDetail(originalRequest,[NSURLSessionConfiguration defaultSessionConfiguration]);
     return CGPagingModernRequest(originalRequest,nil);
 }
 

@@ -23,6 +23,7 @@ ChatGPTRepair_FILES = \
 	src/ConversationPagingCore.m \
 	src/ConversationPagingState.m \
 	src/ConversationPagingNetwork.m \
+	src/ConversationLiveSync.m \
 	src/HistoryIsolation.m \
 	src/HistoryPageCache.m \
 	src/HistoryOriginMerge.m \

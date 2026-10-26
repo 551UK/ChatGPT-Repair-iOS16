@@ -36,8 +36,8 @@ static void CGSyncLog(NSString *event, NSInteger status, NSUInteger count) {
             NSString *path=[NSHomeDirectory() stringByAppendingPathComponent:
                 @"Documents/ChatGPTRepairLiveSync.log"];
             NSFileManager *fm=[NSFileManager defaultManager];
-            if ([[fm attributesOfItemAtPath:path error:NULL][NSFileSize]
-                    description] longLongValue]>262144)
+            NSDictionary *attrs=[fm attributesOfItemAtPath:path error:NULL];
+            if ([attrs[NSFileSize] unsignedLongLongValue]>262144)
                 [fm removeItemAtPath:path error:NULL];
             if (![fm fileExistsAtPath:path])
                 [fm createFileAtPath:path contents:[NSData data] attributes:nil];
@@ -122,18 +122,18 @@ static BOOL CGSyncRefreshController(UIViewController *vc, NSMutableSet *seen) {
     // Skip sidebar/history and offscreen view controllers.
     if (!vc.isViewLoaded || !vc.view.window) return NO;
     NSString *type=NSStringFromClass(vc.class);
-    if (!([type localizedCaseInsensitiveContainsString:@"Conversation"] ||
-          [type localizedCaseInsensitiveContainsString:@"Chat"] ||
-          [type localizedCaseInsensitiveContainsString:@"Message"]))
-        return NO;
-    if ([type localizedCaseInsensitiveContainsString:@"History"]) return NO;
-    if (CGSyncTryRefreshObject(vc)) return YES;
-    // Some versions expose their refresh operation through their view model.
-    for (NSString *key in @[@"viewModel",@"conversationViewModel"]) {
-        @try {
-            id model=[vc valueForKey:key];
-            if (CGSyncTryRefreshObject(model)) return YES;
-        } @catch (__unused NSException *exception) {}
+    BOOL candidate=([type localizedCaseInsensitiveContainsString:@"Conversation"] ||
+        [type localizedCaseInsensitiveContainsString:@"Chat"] ||
+        [type localizedCaseInsensitiveContainsString:@"Message"]) &&
+        ![type localizedCaseInsensitiveContainsString:@"History"];
+    if (candidate) {
+        if (CGSyncTryRefreshObject(vc)) return YES;
+        for (NSString *key in @[@"viewModel",@"conversationViewModel"]) {
+            @try {
+                id model=[vc valueForKey:key];
+                if (CGSyncTryRefreshObject(model)) return YES;
+            } @catch (__unused NSException *exception) {}
+        }
     }
     for (UIViewController *child in vc.childViewControllers) {
         if (CGSyncRefreshController(child,seen)) return YES;
@@ -248,23 +248,27 @@ void CGChatSyncTrackDetail(NSURLRequest *request, NSURLSessionConfiguration *con
         sSyncLastUIRefresh=0;
     }
     CGSyncLog(@"TRACK_CONVERSATION",0,0);
-    CGSyncSchedule(generation,12);
+    (void)generation; // The first conversation loads before background polling starts.
 }
 void CGChatSyncMarkDelivered(NSURLRequest *request, NSDictionary *root) {
     NSString *cid=CGPagingConversationID(request);
     if (!cid.length) return;
     BOOL busy=NO;
     NSUInteger signature=CGSyncFingerprint(root,&busy);
+    NSUInteger token=0;
     @synchronized(CGSyncLock()) {
         if (![sSyncID isEqualToString:cid]) return;
         if (!sSyncHasSignature) {
             sSyncSignature=signature;
             sSyncHasSignature=YES;
         }
+        BOOL firstDelivery=!sSyncDelivered;
         sSyncDelivered=YES;
         if (busy) sSyncBusy=YES;
+        if (firstDelivery) token=sSyncGeneration;
     }
     CGSyncLog(@"INITIAL_CONVERSATION_READY",0,busy?1:0);
+    if (token) CGSyncSchedule(token,5);
 }
 
 __attribute__((constructor)) static void CGSyncBoot(void) {
@@ -276,9 +280,9 @@ __attribute__((constructor)) static void CGSyncBoot(void) {
                 @synchronized(CGSyncLock()) {
                     if (!sSyncID.length) return;
                     sSyncPolls=0;  // Detect progress made while the app was elsewhere.
-                    token=sSyncGeneration;
+                    token=sSyncDelivered?sSyncGeneration:0;
                 }
-                CGSyncSchedule(token,1);
+                if (token) CGSyncSchedule(token,1);
             }];
     });
 }

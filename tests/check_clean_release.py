@@ -55,4 +55,12 @@ assert "PARTIAL_HISTORY" in paging_network
 older=paging_network.split("static void CGPagingRetryOlder(",1)[1].split(
     "NSURLRequest *CGConversationPagingPrepareDetailRequest(",1)[0]
 assert "CGPagingFinishFallback(" not in older
+# Retain Large Chat Test 1 as-is; do not reintroduce Test 2's display cap.
+assert "kDiagnosticMaxRenderMessages" not in paging_network
+sync=(root/"src/ConversationLiveSync.m").read_text()
+assert "CGChatSyncTrackDetail" in sync
+assert "CGChatSyncMarkDelivered" in sync
+assert "CGSyncRequestUIRefresh" in sync
+assert "UIApplicationDidBecomeActiveNotification" in sync
+assert "src/ConversationLiveSync.m" in (root/"Makefile").read_text()
 print("PASS: clean source-only tree and existing repair regression guards")
