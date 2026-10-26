@@ -1,0 +1,284 @@
+// ChatGPTRepair: Recover updates generated on another device without changing chat data.
+// Uses a small authenticated GET, not a second submission or a stream restart.
+#import "ConversationLiveSync.h"
+#import "ConversationPagingState.h"
+#import "ConversationPagingCore.h"
+#import <UIKit/UIKit.h>
+#import <objc/runtime.h>
+#import <objc/message.h>
+
+@interface NSURLSession (CGSyncOriginal)
+- (NSURLSessionDataTask *)cgp_dataTaskWithRequest:(NSURLRequest *)request
+    completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler;
+@end
+
+static NSObject *CGSyncLock(void) {
+    static NSObject *lock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ lock=[NSObject new]; });
+    return lock;
+}
+static NSString *sSyncID;
+static NSURLRequest *sSyncRequest;
+static NSURLSessionConfiguration *sSyncConfiguration;
+static NSUInteger sSyncGeneration;
+static NSUInteger sSyncPolls;
+static NSUInteger sSyncSignature;
+static BOOL sSyncHasSignature;
+static BOOL sSyncDelivered;
+static BOOL sSyncRequestActive;
+static BOOL sSyncBusy;
+static NSTimeInterval sSyncLastUIRefresh;
+
+static void CGSyncLog(NSString *event, NSInteger status, NSUInteger count) {
+    @try {
+        @synchronized([NSFileManager class]) {
+            NSString *path=[NSHomeDirectory() stringByAppendingPathComponent:
+                @"Documents/ChatGPTRepairLiveSync.log"];
+            NSFileManager *fm=[NSFileManager defaultManager];
+            if ([[fm attributesOfItemAtPath:path error:NULL][NSFileSize]
+                    description] longLongValue]>262144)
+                [fm removeItemAtPath:path error:NULL];
+            if (![fm fileExistsAtPath:path])
+                [fm createFileAtPath:path contents:[NSData data] attributes:nil];
+            NSFileHandle *handle=[NSFileHandle fileHandleForWritingAtPath:path];
+            if (handle) {
+                [handle seekToEndOfFile];
+                NSString *line=[NSString stringWithFormat:
+                    @"%@ event=%@ status=%ld value=%lu\n",
+                    [NSDate date],event,(long)status,(unsigned long)count];
+                [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+                [handle closeFile];
+            }
+        }
+    } @catch (__unused NSException *exception) {}
+}
+
+static BOOL CGSyncStatusBusy(id raw) {
+    if ([raw isKindOfClass:NSString.class]) {
+        NSString *s=[(NSString *)raw lowercaseString];
+        for (NSString *name in @[@"running",@"processing",@"pending",@"in_progress",
+                                @"streaming",@"queued",@"generating",@"active"]) {
+            if ([s isEqualToString:name]) return YES;
+        }
+    } else if ([raw isKindOfClass:NSDictionary.class]) {
+        NSDictionary *d=raw;
+        for (NSString *key in @[@"status",@"state",@"phase"]) {
+            if (CGSyncStatusBusy(d[key])) return YES;
+        }
+    }
+    return NO;
+}
+
+static NSUInteger CGSyncFingerprint(NSDictionary *root, BOOL *busyOut) {
+    NSArray *messages=CGConversationPagingMessages(root);
+    NSDictionary *last=[messages.lastObject isKindOfClass:NSDictionary.class]
+        ?messages.lastObject:nil;
+    NSDictionary *msg=[last[@"message"] isKindOfClass:NSDictionary.class]
+        ?last[@"message"]:last;
+    id async=root[@"async_status"];
+    BOOL busy=CGSyncStatusBusy(async) || CGSyncStatusBusy(root[@"status"]) ||
+        CGSyncStatusBusy(msg[@"status"]) || CGSyncStatusBusy(msg[@"metadata"]) ||
+        ([root[@"is_generating"] respondsToSelector:@selector(boolValue)] &&
+         [root[@"is_generating"] boolValue]);
+    if (busyOut) *busyOut=busy;
+    // Hash local state, never log the reply, message IDs, or request credentials.
+    NSMutableArray *parts=[NSMutableArray array];
+    [parts addObject:[root[@"current_node"] isKindOfClass:NSString.class]
+                     ?root[@"current_node"]:@"-"];
+    [parts addObject:async ?: [NSNull null]];
+    [parts addObject:@(messages.count)];
+    if (last) [parts addObject:last];
+    NSData *encoded=[NSJSONSerialization dataWithJSONObject:parts options:0 error:NULL];
+    return encoded ? encoded.hash : 0;
+}
+
+static BOOL CGSyncVisible(void) {
+    UIApplication *app=UIApplication.sharedApplication;
+    return app.applicationState==UIApplicationStateActive;
+}
+
+static BOOL CGSyncTryRefreshObject(id object) {
+    if (!object) return NO;
+    for (NSString *name in @[@"refreshConversation",@"reloadConversation"]) {
+        SEL selector=NSSelectorFromString(name);
+        if (![object respondsToSelector:selector]) continue;
+        Method method=class_getInstanceMethod([object class],selector);
+        if (!method || method_getNumberOfArguments(method)!=2) continue;
+        char returnType[8]={0};
+        method_getReturnType(method,returnType,sizeof(returnType));
+        if (returnType[0]!='v') continue;
+        @try {
+            ((void(*)(id,SEL))objc_msgSend)(object,selector);
+            return YES;
+        } @catch (__unused NSException *exception) {}
+    }
+    return NO;
+}
+
+static BOOL CGSyncRefreshController(UIViewController *vc, NSMutableSet *seen) {
+    if (!vc || [seen containsObject:vc]) return NO;
+    [seen addObject:vc];
+    // Skip sidebar/history and offscreen view controllers.
+    if (!vc.isViewLoaded || !vc.view.window) return NO;
+    NSString *type=NSStringFromClass(vc.class);
+    if (!([type localizedCaseInsensitiveContainsString:@"Conversation"] ||
+          [type localizedCaseInsensitiveContainsString:@"Chat"] ||
+          [type localizedCaseInsensitiveContainsString:@"Message"]))
+        return NO;
+    if ([type localizedCaseInsensitiveContainsString:@"History"]) return NO;
+    if (CGSyncTryRefreshObject(vc)) return YES;
+    // Some versions expose their refresh operation through their view model.
+    for (NSString *key in @[@"viewModel",@"conversationViewModel"]) {
+        @try {
+            id model=[vc valueForKey:key];
+            if (CGSyncTryRefreshObject(model)) return YES;
+        } @catch (__unused NSException *exception) {}
+    }
+    for (UIViewController *child in vc.childViewControllers) {
+        if (CGSyncRefreshController(child,seen)) return YES;
+    }
+    if (vc.presentedViewController &&
+        CGSyncRefreshController(vc.presentedViewController,seen)) return YES;
+    return NO;
+}
+static void CGSyncRequestUIRefresh(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!CGSyncVisible()) return;
+        BOOL refreshed=NO;
+        NSMutableSet *visited=[NSMutableSet set];
+        for (UIWindow *window in UIApplication.sharedApplication.windows) {
+            if (CGSyncRefreshController(window.rootViewController,visited)) {
+                refreshed=YES; break;
+            }
+        }
+        CGSyncLog(refreshed?@"NATIVE_REFRESH":@"NO_NATIVE_REFRESH_SELECTOR",0,0);
+    });
+}
+
+static void CGSyncPoll(NSUInteger generation);
+static void CGSyncSchedule(NSUInteger generation, NSTimeInterval delay) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),
+                   dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
+        CGSyncPoll(generation);
+    });
+}
+
+static void CGSyncPoll(NSUInteger generation) {
+    __block NSURLRequest *request=nil;
+    __block NSURLSessionConfiguration *configuration=nil;
+    @synchronized(CGSyncLock()) {
+        if (generation!=sSyncGeneration || !sSyncID || sSyncRequestActive)
+            return;
+        if (!CGSyncVisible()) return; // Foreground notification restarts polling.
+        if (sSyncPolls>=60 || (!sSyncBusy && sSyncPolls>=8)) {
+            CGSyncLog(@"MONITOR_IDLE",0,sSyncPolls);
+            return;
+        }
+        sSyncRequestActive=YES;
+        sSyncPolls++;
+        request=[sSyncRequest copy];
+        configuration=[sSyncConfiguration copy];
+    }
+    if (!request) return;
+    NSURLRequest *modern=CGPagingModernRequest(request,nil);
+    NSURLSessionConfiguration *config=configuration ?: [NSURLSessionConfiguration defaultSessionConfiguration];
+    config.timeoutIntervalForRequest=25;
+    __block NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
+    NSURLSessionDataTask *task=[session cgp_dataTaskWithRequest:modern
+        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        [session finishTasksAndInvalidate]; session=nil;
+        NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]
+            ?((NSHTTPURLResponse *)response).statusCode:0;
+        NSDictionary *root=(!error && status>=200 && status<300)
+            ?CGConversationPagingJSONObject(data):nil;
+        BOOL busy=NO;
+        NSUInteger hash=root?CGSyncFingerprint(root,&busy):0;
+        BOOL changed=NO, shouldRetry=NO;
+        @synchronized(CGSyncLock()) {
+            if (generation!=sSyncGeneration) return;
+            sSyncRequestActive=NO;
+            if (root) {
+                if (sSyncHasSignature && sSyncSignature!=hash && sSyncDelivered)
+                    changed=YES;
+                sSyncSignature=hash;
+                sSyncHasSignature=YES;
+                sSyncBusy=busy;
+            }
+            shouldRetry=sSyncPolls<60 && (sSyncBusy || sSyncPolls<8);
+            if (changed) {
+                NSTimeInterval now=NSDate.date.timeIntervalSince1970;
+                if (now-sSyncLastUIRefresh<8) changed=NO;
+                else sSyncLastUIRefresh=now;
+            }
+        }
+        CGSyncLog(root?@"POLL_OK":@"POLL_FAILED",status,root?CGConversationPagingMessages(root).count:0);
+        if (changed) {
+            CGSyncLog(@"REMOTE_MESSAGE_CHANGED",status,busy?1:0);
+            CGSyncRequestUIRefresh();
+        }
+        if (shouldRetry) CGSyncSchedule(generation,busy?8:12);
+    }];
+    if (task) [task resume];
+    else {
+        [session invalidateAndCancel]; session=nil;
+        @synchronized(CGSyncLock()) {
+            if (generation==sSyncGeneration) sSyncRequestActive=NO;
+        }
+        CGSyncSchedule(generation,15);
+    }
+}
+
+void CGChatSyncTrackDetail(NSURLRequest *request, NSURLSessionConfiguration *config) {
+    NSString *cid=CGPagingConversationID(request);
+    if (!cid.length || !request) return;
+    NSUInteger generation=0;
+    @synchronized(CGSyncLock()) {
+        if ([sSyncID isEqualToString:cid] && sSyncRequest) return;
+        sSyncID=[cid copy];
+        sSyncRequest=[request copy];
+        sSyncConfiguration=[config copy];
+        sSyncGeneration++;
+        generation=sSyncGeneration;
+        sSyncPolls=0;
+        sSyncRequestActive=NO;
+        sSyncHasSignature=NO;
+        sSyncDelivered=NO;
+        sSyncBusy=NO;
+        sSyncLastUIRefresh=0;
+    }
+    CGSyncLog(@"TRACK_CONVERSATION",0,0);
+    CGSyncSchedule(generation,12);
+}
+void CGChatSyncMarkDelivered(NSURLRequest *request, NSDictionary *root) {
+    NSString *cid=CGPagingConversationID(request);
+    if (!cid.length) return;
+    BOOL busy=NO;
+    NSUInteger signature=CGSyncFingerprint(root,&busy);
+    @synchronized(CGSyncLock()) {
+        if (![sSyncID isEqualToString:cid]) return;
+        if (!sSyncHasSignature) {
+            sSyncSignature=signature;
+            sSyncHasSignature=YES;
+        }
+        sSyncDelivered=YES;
+        if (busy) sSyncBusy=YES;
+    }
+    CGSyncLog(@"INITIAL_CONVERSATION_READY",0,busy?1:0);
+}
+
+__attribute__((constructor)) static void CGSyncBoot(void) {
+    if (![[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.openai.chat"]) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
+            object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *note) {
+                NSUInteger token=0;
+                @synchronized(CGSyncLock()) {
+                    if (!sSyncID.length) return;
+                    sSyncPolls=0;  // Detect progress made while the app was elsewhere.
+                    token=sSyncGeneration;
+                }
+                CGSyncSchedule(token,1);
+            }];
+    });
+}
