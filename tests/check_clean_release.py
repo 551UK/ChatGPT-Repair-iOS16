@@ -74,4 +74,12 @@ assert "CGSyncIndicator" in sync and "UIActivityIndicatorView" in sync
 assert "CGSyncReopenCurrentConversation" in sync
 assert "NATIVE_RESELECT" in sync
 assert "kDiagnosticMaxRenderMessages" not in paging_network
+# The missing UI refresh was due to losing the sidebar controller when chat opens.
+pins=(root/"src/PinnedSidebarIntegration.m").read_text()
+assert "CGChatSyncRememberHistoryController((UIViewController *)self)" in pins
+assert "CGChatSyncRememberHistoryController" in sync
+assert "RESELECT_CACHED_SUCCESS" in sync
+assert "RESELECT_NO_HISTORY_CONTROLLER" in sync
+assert "sSyncRecentHistoryController" in sync
+assert "canInvoke=vc.isViewLoaded" in sync
 print("PASS: clean source-only tree and existing repair regression guards")

@@ -16,6 +16,7 @@
 #import "HistoryOriginMerge.h"
 #import "CitationCompat.h"
 #import "ConversationPagingCompat.h"
+#import "ConversationLiveSync.h"
 #import "PinnedSectionStore.h"
 #import "PinnedSidebarView.h"
 #import "PinnedLayoutShim.h"
@@ -770,6 +771,8 @@ static void CGRender(id controller) {
 }
 static void CGHistoryLayout(id self, SEL command) {
     ((void(*)(id, SEL))sOriginalLayout)(self,command);
+    if ([self isKindOfClass:UIViewController.class])
+        CGChatSyncRememberHistoryController((UIViewController *)self);
     CGRender(self);
 }
 static void CGHistoryScroll(id self, SEL command, UIScrollView *scroll) {
@@ -778,8 +781,10 @@ static void CGHistoryScroll(id self, SEL command, UIScrollView *scroll) {
 }
 static void CGHistoryAppear(id self, SEL command, BOOL animated) {
     ((void(*)(id, SEL, BOOL))sOriginalAppear)(self,command,animated);
-    if ([self isKindOfClass:UIViewController.class])
+    if ([self isKindOfClass:UIViewController.class]) {
         sVisibleHistoryController=(UIViewController *)self;
+        CGChatSyncRememberHistoryController((UIViewController *)self);
+    }
     CGRefreshPins();
     CGRender(self);
 }

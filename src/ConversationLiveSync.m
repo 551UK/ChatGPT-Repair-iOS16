@@ -18,6 +18,7 @@ static NSObject *CGSyncLock(void) {
     dispatch_once(&once, ^{ lock=[NSObject new]; });
     return lock;
 }
+static __weak UIViewController *sSyncRecentHistoryController;
 static NSString *sSyncID;
 static NSString *sSyncTitle;
 static NSURLRequest *sSyncRequest;
@@ -99,6 +100,17 @@ static void CGSyncIndicator(NSString *state, BOOL visible) {
     });
 }
 
+// The HistoryViewController is normally removed from the visible hierarchy
+// when a conversation opens, but its native view model can still re-select it.
+void CGChatSyncRememberHistoryController(UIViewController *controller) {
+    if (!controller ||
+        ![NSStringFromClass(controller.class) containsString:@"HistoryViewController"])
+        return;
+    @synchronized(CGSyncLock()) {
+        sSyncRecentHistoryController=controller;
+    }
+    CGSyncLog(@"HISTORY_CONTROLLER_CACHED",0,1);
+}
 static UIViewController *CGSyncFindHistoryController(UIViewController *vc,
                                                     NSMutableSet *visited) {
     if (!vc || [visited containsObject:vc]) return nil;
@@ -109,6 +121,18 @@ static UIViewController *CGSyncFindHistoryController(UIViewController *vc,
         UIViewController *hit=CGSyncFindHistoryController(child,visited);
         if (hit) return hit;
     }
+    if ([vc isKindOfClass:UINavigationController.class]) {
+        for (UIViewController *child in ((UINavigationController *)vc).viewControllers) {
+            UIViewController *hit=CGSyncFindHistoryController(child,visited);
+            if (hit) return hit;
+        }
+    }
+    if ([vc isKindOfClass:UISplitViewController.class]) {
+        for (UIViewController *child in ((UISplitViewController *)vc).viewControllers) {
+            UIViewController *hit=CGSyncFindHistoryController(child,visited);
+            if (hit) return hit;
+        }
+    }
     if (vc.presentedViewController) {
         UIViewController *hit=CGSyncFindHistoryController(vc.presentedViewController,visited);
         if (hit) return hit;
@@ -118,14 +142,34 @@ static UIViewController *CGSyncFindHistoryController(UIViewController *vc,
 extern BOOL CG46OpenPin(UIViewController *,NSString *,NSString *);
 static BOOL CGSyncReopenCurrentConversation(NSString *identifier, NSString *title) {
     if (![[NSUUID alloc] initWithUUIDString:identifier]) return NO;
+    UIViewController *cached=nil;
+    @synchronized(CGSyncLock()) {
+        cached=sSyncRecentHistoryController;
+    }
+    NSString *safeTitle=title.length?title:@"Chat";
+    if (cached) {
+        CGSyncLog(@"RESELECT_CACHED_ATTEMPT",0,1);
+        @try {
+            if (CG46OpenPin(cached,identifier,safeTitle)) {
+                CGSyncLog(@"RESELECT_CACHED_SUCCESS",0,1);
+                return YES;
+            }
+        } @catch (__unused NSException *exception) {}
+        CGSyncLog(@"RESELECT_CACHED_FAILED",0,0);
+    }
     NSMutableSet *visited=[NSMutableSet set];
     for (UIWindow *window in UIApplication.sharedApplication.windows) {
         UIViewController *history=CGSyncFindHistoryController(window.rootViewController,visited);
-        if (!history) continue;
+        if (!history || history==cached) continue;
+        CGChatSyncRememberHistoryController(history);
         @try {
-            return CG46OpenPin(history,identifier,title.length?title:@"Chat");
+            if (CG46OpenPin(history,identifier,safeTitle)) {
+                CGSyncLog(@"RESELECT_WINDOW_SUCCESS",0,1);
+                return YES;
+            }
         } @catch (__unused NSException *exception) {}
     }
+    CGSyncLog(cached?@"RESELECT_NATIVE_REJECTED":@"RESELECT_NO_HISTORY_CONTROLLER",0,0);
     return NO;
 }
 
@@ -195,14 +239,15 @@ static BOOL CGSyncTryRefreshObject(id object) {
 static BOOL CGSyncRefreshController(UIViewController *vc, NSMutableSet *seen) {
     if (!vc || [seen containsObject:vc]) return NO;
     [seen addObject:vc];
-    // Skip sidebar/history and offscreen view controllers.
-    if (!vc.isViewLoaded || !vc.view.window) return NO;
+    // Offscreen container controllers may still own the active chat. Traverse
+    // their children; only invoke an action on controllers with loaded views.
+    BOOL canInvoke=vc.isViewLoaded && vc.view.window!=nil;
     NSString *type=NSStringFromClass(vc.class);
     BOOL candidate=([type localizedCaseInsensitiveContainsString:@"Conversation"] ||
         [type localizedCaseInsensitiveContainsString:@"Chat"] ||
         [type localizedCaseInsensitiveContainsString:@"Message"]) &&
         ![type localizedCaseInsensitiveContainsString:@"History"];
-    if (candidate) {
+    if (candidate && canInvoke) {
         if (CGSyncTryRefreshObject(vc)) return YES;
         for (NSString *key in @[@"viewModel",@"conversationViewModel"]) {
             @try {
