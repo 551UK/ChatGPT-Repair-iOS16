@@ -47,20 +47,6 @@ NSString *CGConversationPagingStartCursor(NSDictionary *root, BOOL *hasPrevious)
         ? cursor : nil;
 }
 
-BOOL CGConversationPagingHasVersionMarkers(NSDictionary *root) {
-    id rootMarker=root[@"has_versions"];
-    if ([rootMarker respondsToSelector:@selector(boolValue)] && [rootMarker boolValue]) return YES;
-    for (id raw in CGConversationPagingMessages(root)) {
-        NSDictionary *message=CGPagingMessageObject(raw);
-        id direct=message[@"has_versions"];
-        if ([direct respondsToSelector:@selector(boolValue)] && [direct boolValue]) return YES;
-        NSDictionary *metadata=[message[@"metadata"] isKindOfClass:NSDictionary.class]?message[@"metadata"]:nil;
-        id marker=metadata[@"has_versions"];
-        if ([marker respondsToSelector:@selector(boolValue)] && [marker boolValue]) return YES;
-    }
-    return NO;
-}
-
 NSArray *CGConversationPagingMergeMessages(NSArray *older, NSArray *newer) {
     NSMutableArray<NSString *> *order=[NSMutableArray array];
     NSMutableDictionary<NSString *,id> *byID=[NSMutableDictionary dictionary];

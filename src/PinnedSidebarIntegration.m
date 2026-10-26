@@ -10,10 +10,6 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
-#import <mach-o/dyld.h>
-#import <mach-o/loader.h>
-#import <dlfcn.h>
-#import <string.h>
 #include <math.h>
 #import "PinService.h"
 #import "HistoryPageCache.h"

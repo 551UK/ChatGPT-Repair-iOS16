@@ -48,16 +48,6 @@ int main(void) {
         NSCAssert([mapping[@"m3"][@"children"][0] isEqualToString:@"m4"],@"message chain broken at m3");
         NSCAssert(!legacy[@"messages"] && !legacy[@"page_info"],@"modern paging fields leaked to legacy decoder");
 
-        NSMutableDictionary *branched=[latest mutableCopy];
-        NSMutableArray *versioned=[latest[@"messages"] mutableCopy];
-        NSMutableDictionary *firstVersioned=[versioned[0] mutableCopy];
-        NSMutableDictionary *metadata=[firstVersioned[@"metadata"] mutableCopy] ?: [NSMutableDictionary dictionary];
-        metadata[@"has_versions"]=@YES;
-        firstVersioned[@"metadata"]=metadata;
-        versioned[0]=firstVersioned;
-        branched[@"messages"]=versioned;
-        NSCAssert(CGConversationPagingHasVersionMarkers(branched),@"branch/version marker was not detected");
-
         NSLog(@"PASS: conversation pages merge and convert to the 2024 mapping shape");
     }
     return 0;

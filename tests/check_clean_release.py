@@ -57,6 +57,7 @@ older=paging_network.split("static void CGPagingRetryOlder(",1)[1].split(
 assert "CGPagingFinishFallback(" not in older
 # Retain Large Chat Test 1 as-is; do not reintroduce Test 2's display cap.
 assert "kDiagnosticMaxRenderMessages" not in paging_network
+assert "CGConversationPagingHasVersionMarkers" not in (root/"src/ConversationPagingCore.m").read_text()
 sync=(root/"src/ConversationLiveSync.m").read_text()
 assert "CGChatSyncTrackDetail" in sync
 assert "CGChatSyncMarkDelivered" in sync
