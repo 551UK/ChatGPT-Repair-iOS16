@@ -2,6 +2,8 @@
 
 One unified, source-built iOS 16 ChatGPT tweak: models, voice, generated images, chat history, sidebar, pins, links and downloads.
 
+EDIT: Condsider using my ChatGPT app, its alot better than repairing the older IPA. https://github.com/551UK/ChatGPT-App-iOS16
+
 ## Features
 
 - Restores chat history, older conversations and long-chat loading.
